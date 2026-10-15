@@ -4,7 +4,7 @@ import {
   Clock, ArrowRight, Info, AlertCircle, Settings, LogOut, X,
   Wallet, Loader2, Shield, Navigation2, CheckCircle,
   Plus, Eye, Trash2, Edit2, Navigation,
-  Bookmark, Volume2, Moon, Globe, ChevronDown,
+  Bookmark, Volume2, Moon, Globe, ChevronDown, Bot, LocateFixed,
 } from "lucide-react";
 
 // ─── TYPES ────────────────────────────────────────────────────────────────────
@@ -12,7 +12,7 @@ import {
 type Screen =
   | "home" | "routes" | "route-detail" | "vehicles"
   | "map" | "trips" | "fares" | "notifications"
-  | "profile" | "admin" | "favorites" | "settings";
+  | "profile" | "admin" | "favorites" | "settings" | "assistant";
 
 type TabId = "home" | "routes" | "map" | "trips" | "profile" | "admin";
 type AuthRole = "client" | "worker";
@@ -315,6 +315,13 @@ function AuthScreen({onLogin}: {onLogin: (u: AppUser) => void}) {
     finally { setLoading(false); }
   };
 
+  const socialLogin = (provider: "google" | "microsoft") => {
+    const native = !!(window as any).Capacitor?.isNativePlatform?.();
+    const url = `${API_BASE}/auth/oauth/${provider}/start?mode=${native ? "mobile" : "web"}`;
+    if (native) { import("@capacitor/browser").then(({Browser}) => Browser.open({url})).catch(() => setErr("No se pudo abrir el inicio de sesión")); }
+    else window.location.assign(url);
+  };
+
   const doRegister = async () => {
     if (!name.trim() || !email.trim() || !pass || !cpass) { setErr("Completa todos los campos."); return; }
     if (pass !== cpass) { setErr("Las contraseñas no coinciden."); return; }
@@ -354,6 +361,11 @@ function AuthScreen({onLogin}: {onLogin: (u: AppUser) => void}) {
             className="w-full bg-green-700 hover:bg-green-800 text-white rounded-xl py-3 text-sm font-bold flex items-center justify-center gap-2 transition-colors disabled:opacity-60">
             {loading && <Loader2 className="w-4 h-4 animate-spin"/>}Iniciar sesión
           </button>
+        </div>
+        <div className="flex items-center gap-2 my-4"><div className="flex-1 border-t border-gray-200"/><span className="text-xs text-gray-400">o continúa con</span><div className="flex-1 border-t border-gray-200"/></div>
+        <div className="grid grid-cols-2 gap-2">
+          <button disabled={loading} onClick={() => socialLogin("google")} className="border border-gray-200 bg-white rounded-xl py-3 text-sm font-semibold text-gray-700">Google</button>
+          <button disabled={loading} onClick={() => socialLogin("microsoft")} className="border border-gray-200 bg-white rounded-xl py-3 text-sm font-semibold text-gray-700">Microsoft</button>
         </div>
         <button onClick={() => { setMode("forgot"); setErr(""); setEmail(""); }}
           className="w-full text-center text-xs text-green-700 mt-3 hover:underline font-medium py-1">
@@ -642,12 +654,52 @@ function MapScreen({busPositions, activeRoute, onRouteChange}: {
 
 // ─── HOME SCREEN ──────────────────────────────────────────────────────────────
 
+function AssistantScreen({onBack}: {onBack: () => void}) {
+  const [origin,setOrigin]=useState("");
+  const [destination,setDestination]=useState("");
+  const [location,setLocation]=useState<{latitude:number;longitude:number}|undefined>();
+  const [loading,setLoading]=useState(false);
+  const [message,setMessage]=useState("");
+  const [routes,setRoutes]=useState<Array<{nombre:string;origen:string;destino:string;paraderos:string}>>([]);
+  const [error,setError]=useState("");
+  const useLocation=() => {
+    setError("");
+    navigator.geolocation.getCurrentPosition(p=>{
+      setLocation({latitude:p.coords.latitude,longitude:p.coords.longitude});
+      setOrigin("Mi ubicación");
+    },()=>setError("No se pudo acceder al GPS. Revisa los permisos de ubicación."),{enableHighAccuracy:true,timeout:12000});
+  };
+  const ask=async () => {
+    setLoading(true);setError("");setMessage("");setRoutes([]);
+    try {
+      const result=await api<{answer:string;routes:typeof routes}>("/assistant/routes",{method:"POST",body:JSON.stringify({origin,destination,location})});
+      setMessage(result.answer);setRoutes(result.routes||[]);
+    } catch(e) {setError(e instanceof Error?e.message:"Error de conexión");}
+    finally {setLoading(false);}
+  };
+  return <div className="flex-1 overflow-y-auto bg-gray-50 p-5">
+    <div className="flex items-center gap-3 mb-6"><button onClick={onBack} aria-label="Volver"><ChevronLeft/></button><Bot className="text-green-700"/><h1 className="font-bold text-xl">Asistente de rutas</h1></div>
+    <div className="bg-white border border-gray-100 rounded-2xl p-4 space-y-3 shadow-sm">
+      <p className="text-sm text-gray-600">Dime desde dónde sales y adónde quieres llegar. Consultaré las rutas verificadas por Wayvo.</p>
+      <label className="block text-xs font-bold text-gray-700">Origen</label>
+      <div className="flex gap-2"><input aria-label="Origen" value={origin} onChange={e=>{setOrigin(e.target.value);setLocation(undefined);}} placeholder="Barrio, paradero o dirección" className="border rounded-xl p-3 text-sm min-w-0 flex-1"/><button onClick={useLocation} title="Usar ubicación actual" aria-label="Usar ubicación actual" className="border rounded-xl px-3 text-green-700"><LocateFixed size={18}/></button></div>
+      <label className="block text-xs font-bold text-gray-700">Destino</label>
+      <input aria-label="Destino" value={destination} onChange={e=>setDestination(e.target.value)} placeholder="¿A dónde quieres ir?" className="w-full border rounded-xl p-3 text-sm"/>
+      <button onClick={ask} disabled={loading || !origin.trim() || !destination.trim()} className="w-full rounded-xl bg-green-700 text-white font-bold py-3 disabled:opacity-50">{loading?"Consultando rutas...":"Preguntar a Wayvo"}</button>
+    </div>
+    {error && <p role="alert" className="mt-4 text-sm text-red-600">{error}</p>}
+    {message && <div aria-live="polite" className="bg-white rounded-2xl p-4 mt-4 border border-gray-100"><p className="text-sm text-gray-800 whitespace-pre-wrap">{message}</p>{routes.map((r,i)=><div key={i} className="border-t mt-3 pt-3 text-xs text-gray-700"><strong>{r.nombre}</strong><div>{r.origen} → {r.destino}</div></div>)}</div>}
+    <p className="text-xs text-gray-500 mt-5">Las sugerencias dependen de las rutas registradas; no representan datos en vivo. Verifica horarios y paraderos antes de viajar. El GPS requiere permisos y datos geográficos para resolver paraderos cercanos.</p>
+  </div>;
+}
+
 function HomeScreen({user, busPositions, unread, onNavigate}: {
   user: AppUser; busPositions: BusPos[]; unread: number;
   onNavigate: (s: Screen|TabId) => void;
 }) {
   const [search, setSearch] = useState("");
   const quickActions = [
+    {icon: Bot, label:"Preguntar a IA", dest:"assistant", bg:"bg-green-50", fg:"text-green-700"},
     {icon: Navigation, label:"Rutas y líneas",   dest:"routes",    bg:"bg-blue-50",   fg:"text-blue-600"},
     {icon: MapPin,     label:"Ubicación buses",  dest:"map",       bg:"bg-green-50",  fg:"text-green-600"},
     {icon: Wallet,     label:"Tarifas",          dest:"fares",     bg:"bg-amber-50",  fg:"text-amber-600"},
@@ -1480,6 +1532,21 @@ export default function App() {
   const [user, setUser] = useState<AppUser|null>(null);
   const [checkingSession, setCheckingSession] = useState(!!sessionToken);
   useEffect(() => {
+    const consume = async (ticket:string) => {
+      try { const result=await api<{token:string;user:AppUser}>("/auth/oauth/exchange",{method:"POST",body:JSON.stringify({ticket})}); setSession(result.token);setUser(result.user); }
+      catch(e){ console.error("OAuth:",e); }
+      finally {setCheckingSession(false);}
+    };
+    const ticket=new URLSearchParams(window.location.search).get("ticket");
+    if(ticket){window.history.replaceState(null,"",window.location.pathname);consume(ticket);}
+    let remove:undefined|(()=>void);
+    import("@capacitor/app").then(({App:CapApp})=>CapApp.addListener("appUrlOpen", async e=>{
+      const t=new URL(e.url).searchParams.get("ticket");
+      if(t){ await import("@capacitor/browser").then(({Browser})=>Browser.close()).catch(()=>{});consume(t); }
+    })).then(listener=>{remove=()=>listener.remove();}).catch(()=>{});
+    return ()=>remove?.();
+  },[]);
+  useEffect(() => {
     if (!sessionToken) return;
     api<{user: AppUser}>("/auth/me").then(data => setUser(data.user))
       .catch(() => clearSession()).finally(() => setCheckingSession(false));
@@ -1541,6 +1608,7 @@ export default function App() {
 
   const renderScreen = () => {
     switch (screen) {
+      case "assistant": return <AssistantScreen onBack={goBack}/>;
       case "notifications": return <NotificationsScreen notifications={notifications} onBack={goBack} onMarkRead={markRead}/>;
       case "fares":         return <FaresScreen onBack={goBack}/>;
       case "vehicles":      return <VehiclesScreen onBack={goBack} onViewMap={goToMap}/>;

@@ -75,7 +75,9 @@
     "vaul": "1.1.2",
     "@capacitor/core": "^8.0.0",
     "@capacitor/android": "^8.0.0",
-    "@capacitor/ios": "^8.0.0"
+    "@capacitor/ios": "^8.0.0",
+    "@capacitor/app": "^8.0.0",
+    "@capacitor/browser": "^8.0.0"
   },
   "devDependencies": {
     "@tailwindcss/vite": "4.1.12",
