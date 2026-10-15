@@ -30,3 +30,21 @@
   animation: dashScroll 0.5s linear infinite;
   width: 200%;
 }
+
+/* Acceso Wayvo: retro urbano, coherente con el verde de la app */
+.wayvo-retro-auth { position:relative; isolation:isolate; overflow:hidden; background: #e9eee0; background-image:radial-gradient(#8da58e55 1.1px,transparent 1.1px),linear-gradient(150deg,#f8f4e7,#dbebda 55%,#c9ddc4); background-size:24px 24px,100% 100%; }
+.retro-auth-inner {position:relative; z-index:1; width:100%; max-width:390px;}
+.retro-kicker {width:fit-content; margin:0 auto 14px; padding:7px 14px; color:#174e3a; background:#e6efbb; border:2px solid #1f513d; box-shadow:3px 3px 0 #1f513d; font-size:10px; font-weight:900; letter-spacing:2px; transform:rotate(-2deg);}
+.retro-orbit {position:absolute; border:2px solid #39735733; border-radius:50%;pointer-events:none}
+.retro-orbit-one {height:440px;width:440px;top:-270px;right:-210px;box-shadow:0 0 0 45px #c3d9b544,0 0 0 90px #f2d87933}
+.retro-orbit-two {height:350px;width:350px;bottom:-240px;left:-190px;box-shadow:0 0 0 35px #9cb88f55,0 0 0 75px #f1d67844}
+.retro-auth-card {background:#fffef8!important; border:2px solid #1b4535!important;box-shadow:8px 8px 0 #1b4535!important; border-radius:21px!important;}
+.retro-auth-ticket {font-size:10px;letter-spacing:1.6px;font-weight:900;color:#2e644a;display:flex;justify-content:space-between;padding-bottom:11px;margin-bottom:13px;border-bottom:2px dashed #bed0b1}
+.retro-primary {box-shadow:4px 4px 0 #173d2e; border:1px solid #173d2e; transform:translate(0,0);transition:transform .12s,box-shadow .12s}
+.retro-primary:active {transform:translate(3px,3px);box-shadow:1px 1px 0 #173d2e}
+.retro-social {display:flex;justify-content:center;align-items:center;gap:7px;border:1.5px solid #365942!important;box-shadow:2px 2px 0 #365942;transition:background .15s}
+.retro-social:hover {background:#eef5e7!important}
+.retro-google-g {font-weight:900;font-size:17px;color:#4285f4;text-shadow:1px 1px #fbbc05}
+.retro-ms-grid {display:grid;grid-template-columns:repeat(2,6px);gap:2px}.retro-ms-grid i {height:6px;width:6px;background:#f25022}.retro-ms-grid i:nth-child(2){background:#7fba00}.retro-ms-grid i:nth-child(3){background:#00a4ef}.retro-ms-grid i:nth-child(4){background:#ffb900}
+.wayvo-retro-auth input {background:#f4f6ed;border:1px solid #b5c5ad;border-radius:10px}
+.wayvo-retro-auth h1 {font-weight:900;letter-spacing:-1px;font-size:34px;color:#164833}

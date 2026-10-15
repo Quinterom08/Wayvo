@@ -44,15 +44,21 @@ interface AppNotif {
 
 // On native devices the API must be deployed over HTTPS; localhost means the phone.
 // A relative /api path is valid only for the web deployment behind a reverse proxy.
+const isNativeApp = () => !!(window as any).Capacitor?.isNativePlatform?.();
 const API_BASE = (import.meta.env.VITE_API_URL || "/api").replace(/\/$/, "");
+const missingNativeApi = () => isNativeApp() && !/^https:\/\//.test(API_BASE);
+const apiConnectionHelp = "No se pudo conectar al servidor de Wayvo. Para usarlo en web inicia también el backend (python backend/server.py). En Android/iOS configura VITE_API_URL=https://tu-servidor/api antes de compilar.";
 let sessionToken = sessionStorage.getItem("wayvo_token") || "";
 async function api<T = any>(path: string, options: RequestInit = {}): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, {
+  if (missingNativeApi()) throw new Error("La app móvil no tiene un servidor configurado. Define VITE_API_URL con la dirección HTTPS de tu backend antes de compilar.");
+  let res: Response;
+  try { res = await fetch(`${API_BASE}${path}`, {
     ...options,
     headers: { "Content-Type": "application/json", ...(sessionToken ? { Authorization: `Bearer ${sessionToken}` } : {}), ...options.headers },
   });
+  } catch (e) { throw new Error(e instanceof TypeError ? apiConnectionHelp : (e instanceof Error ? e.message : apiConnectionHelp)); }
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || "No se pudo completar la solicitud");
+  if (!res.ok) throw new Error(data.error || `El servidor devolvió un error (${res.status}).`);
   return data as T;
 }
 function setSession(token: string) { sessionToken = token; sessionStorage.setItem("wayvo_token", token); }
@@ -315,11 +321,19 @@ function AuthScreen({onLogin}: {onLogin: (u: AppUser) => void}) {
     finally { setLoading(false); }
   };
 
-  const socialLogin = (provider: "google" | "microsoft") => {
-    const native = !!(window as any).Capacitor?.isNativePlatform?.();
-    const url = `${API_BASE}/auth/oauth/${provider}/start?mode=${native ? "mobile" : "web"}`;
-    if (native) { import("@capacitor/browser").then(({Browser}) => Browser.open({url})).catch(() => setErr("No se pudo abrir el inicio de sesión")); }
-    else window.location.assign(url);
+  const socialLogin = async (provider: "google" | "microsoft") => {
+    setErr(""); setLoading(true);
+    try {
+      if (missingNativeApi()) throw new Error("Para usar Google o Microsoft en el teléfono primero configura VITE_API_URL con tu backend público HTTPS.");
+      const status = await api<{ configured: boolean; error?: string }>(`/auth/oauth/${provider}/status`);
+      if (!status.configured) throw new Error(status.error || `El acceso con ${provider} aún requiere configurar las credenciales OAuth en el servidor.`);
+      const url = `${API_BASE}/auth/oauth/${provider}/start?mode=${isNativeApp() ? "mobile" : "web"}`;
+      if (isNativeApp()) {
+        const { Browser } = await import("@capacitor/browser");
+        await Browser.open({ url });
+      } else window.location.assign(url);
+    } catch (e) { setErr(e instanceof Error ? e.message : "No se pudo iniciar el acceso social."); }
+    finally { setLoading(false); }
   };
 
   const doRegister = async () => {
@@ -348,24 +362,27 @@ function AuthScreen({onLogin}: {onLogin: (u: AppUser) => void}) {
   );
 
   if (mode === "login") return (
-    <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center px-5 py-10">
-      <AuthLogo/>
-      <Card className="w-full max-w-sm p-6">
-        <h2 className="text-base font-bold text-gray-900 mb-5">Iniciar sesión</h2>
+    <div className="wayvo-retro-auth min-h-screen flex flex-col items-center justify-center px-5 py-10">
+      <div className="retro-orbit retro-orbit-one" aria-hidden="true"/><div className="retro-orbit retro-orbit-two" aria-hidden="true"/>
+      <div className="retro-auth-inner"><div className="retro-kicker">● RUTA LIBRE · EDICIÓN 2026</div><AuthLogo/>
+      <Card className="retro-auth-card w-full max-w-sm p-6">
+        <div className="retro-auth-ticket">TU VIAJE EMPIEZA AQUÍ <span>↗</span></div>
+        <h2 className="text-xl font-black text-gray-900 mb-1">¡Qué bueno verte!</h2>
+        <p className="text-xs text-gray-500 mb-5">Entra a Wayvo y muévete a tu ritmo.</p>
         {success && <div className="bg-green-50 text-green-700 text-xs rounded-xl px-3 py-2.5 mb-4 flex items-start gap-2"><CheckCircle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5"/>{success}</div>}
         {err && <div className="bg-red-50 text-red-600 text-xs rounded-xl px-3 py-2.5 mb-4 flex items-start gap-2"><AlertCircle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5"/>{err}</div>}
         <div className="space-y-3">
           {f("Correo electrónico", "email", email, setEmail, "correo@ejemplo.com")}
           {f("Contraseña", "password", pass, setPass, "••••••••", doLogin)}
           <button onClick={doLogin} disabled={loading}
-            className="w-full bg-green-700 hover:bg-green-800 text-white rounded-xl py-3 text-sm font-bold flex items-center justify-center gap-2 transition-colors disabled:opacity-60">
+            className="retro-primary w-full bg-green-700 hover:bg-green-800 text-white rounded-xl py-3 text-sm font-bold flex items-center justify-center gap-2 transition-colors disabled:opacity-60">
             {loading && <Loader2 className="w-4 h-4 animate-spin"/>}Iniciar sesión
           </button>
         </div>
         <div className="flex items-center gap-2 my-4"><div className="flex-1 border-t border-gray-200"/><span className="text-xs text-gray-400">o continúa con</span><div className="flex-1 border-t border-gray-200"/></div>
         <div className="grid grid-cols-2 gap-2">
-          <button disabled={loading} onClick={() => socialLogin("google")} className="border border-gray-200 bg-white rounded-xl py-3 text-sm font-semibold text-gray-700">Google</button>
-          <button disabled={loading} onClick={() => socialLogin("microsoft")} className="border border-gray-200 bg-white rounded-xl py-3 text-sm font-semibold text-gray-700">Microsoft</button>
+          <button disabled={loading} onClick={() => socialLogin("google")} className="retro-social border border-gray-200 bg-white rounded-xl py-3 text-sm font-semibold text-gray-700"><span className="retro-google-g">G</span> Google</button>
+          <button disabled={loading} onClick={() => socialLogin("microsoft")} className="retro-social border border-gray-200 bg-white rounded-xl py-3 text-sm font-semibold text-gray-700"><span className="retro-ms-grid" aria-hidden="true"><i/><i/><i/><i/></span> Microsoft</button>
         </div>
         <button onClick={() => { setMode("forgot"); setErr(""); setEmail(""); }}
           className="w-full text-center text-xs text-green-700 mt-3 hover:underline font-medium py-1">
@@ -379,18 +396,20 @@ function AuthScreen({onLogin}: {onLogin: (u: AppUser) => void}) {
           Regístrate
         </button>
       </p>
+      </div>
     </div>
   );
 
   if (mode === "register") return (
-    <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center px-5 py-10">
-      <AuthLogo/>
-      <Card className="w-full max-w-sm p-6">
+    <div className="wayvo-retro-auth min-h-screen flex flex-col items-center justify-center px-5 py-10">
+      <div className="retro-orbit retro-orbit-one" aria-hidden="true"/><div className="retro-orbit retro-orbit-two" aria-hidden="true"/>
+      <div className="retro-auth-inner"><div className="retro-kicker">● RUTA LIBRE · EDICIÓN 2026</div><AuthLogo/>
+      <Card className="retro-auth-card w-full max-w-sm p-6">
         <div className="flex items-center gap-2 mb-5">
           <button onClick={() => { setMode("login"); setErr(""); }} className="w-8 h-8 rounded-full bg-gray-50 border border-gray-200 flex items-center justify-center hover:bg-gray-100">
             <ChevronLeft className="w-4 h-4 text-gray-600"/>
           </button>
-          <h2 className="text-base font-bold text-gray-900">Crear cuenta</h2>
+          <h2 className="text-xl font-black text-gray-900">Súbete a Wayvo</h2>
         </div>
         {err && <div className="bg-red-50 text-red-600 text-xs rounded-xl px-3 py-2.5 mb-4 flex items-start gap-2"><AlertCircle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5"/>{err}</div>}
         <div className="space-y-3">
@@ -399,7 +418,7 @@ function AuthScreen({onLogin}: {onLogin: (u: AppUser) => void}) {
           {f("Contraseña", "password", pass, setPass, "Mínimo 8 caracteres")}
           {f("Confirmar contraseña", "password", cpass, setCpass, "Repite la contraseña", doRegister)}
           <button onClick={doRegister} disabled={loading}
-            className="w-full bg-green-700 hover:bg-green-800 text-white rounded-xl py-3 text-sm font-bold flex items-center justify-center gap-2 transition-colors disabled:opacity-60">
+            className="retro-primary w-full bg-green-700 hover:bg-green-800 text-white rounded-xl py-3 text-sm font-bold flex items-center justify-center gap-2 transition-colors disabled:opacity-60">
             {loading && <Loader2 className="w-4 h-4 animate-spin"/>}Crear cuenta
           </button>
         </div>
@@ -411,6 +430,7 @@ function AuthScreen({onLogin}: {onLogin: (u: AppUser) => void}) {
           </button>
         </p>
       </Card>
+      </div>
     </div>
   );
 

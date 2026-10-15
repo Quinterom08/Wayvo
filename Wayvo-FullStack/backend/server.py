@@ -149,6 +149,9 @@ class Handler(BaseHTTPRequestHandler):
             data = self.payload() if method in ('POST', 'PUT', 'PATCH') else {}
             with connect() as db:
                 if path.startswith('/api/auth/oauth/') and method == 'GET':
+                    if len(parts)==5 and parts[4]=='status' and parts[3] in ('google','microsoft'):
+                        configured = oauth_config(parts[3]) is not None
+                        return self.send(200, {'configured':configured, 'error':None if configured else 'Acceso social aún sin configurar. Añade WAYVO_PUBLIC_API_URL y las credenciales de '+parts[3]+' al servidor (consulta CONFIGURACION.md).'})
                     if len(parts)!=5 or parts[2]!='oauth': return self.send(404,{'error':'Ruta desconocida'})
                     provider, action = parts[3], parts[4]
                     cfg = oauth_config(provider)
