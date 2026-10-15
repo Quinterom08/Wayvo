@@ -1,0 +1,32 @@
+/* Bus: ciclo continuo izquierda → derecha con transform (GPU) */
+@keyframes busRide {
+  0%   { transform: translateX(-56px) translateY(-50%); }
+  100% { transform: translateX(480px) translateY(-50%); }
+}
+
+.bus-drive {
+  position: absolute;
+  top: 50%;
+  /* translateY vive solo en los keyframes para no interferir */
+  animation: busRide 2.6s linear infinite;
+  will-change: transform;
+}
+
+/* Rayas centrales de la carretera desplazándose */
+@keyframes dashScroll {
+  from { transform: translateX(0); }
+  to   { transform: translateX(-50%); }
+}
+
+.road-center-dashes {
+  background: repeating-linear-gradient(
+    90deg,
+    transparent            0px,
+    transparent            14px,
+    rgba(255,255,255,0.32) 14px,
+    rgba(255,255,255,0.32) 26px
+  );
+  background-size: 40px 100%;
+  animation: dashScroll 0.5s linear infinite;
+  width: 200%;
+}
