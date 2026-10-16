@@ -48,3 +48,43 @@
 .retro-ms-grid {display:grid;grid-template-columns:repeat(2,6px);gap:2px}.retro-ms-grid i {height:6px;width:6px;background:#f25022}.retro-ms-grid i:nth-child(2){background:#7fba00}.retro-ms-grid i:nth-child(3){background:#00a4ef}.retro-ms-grid i:nth-child(4){background:#ffb900}
 .wayvo-retro-auth input {background:#f4f6ed;border:1px solid #b5c5ad;border-radius:10px}
 .wayvo-retro-auth h1 {font-weight:900;letter-spacing:-1px;font-size:34px;color:#164833}
+
+
+/* ===== WAYVO / RUTA LIBRE: DESIGN SYSTEM RETRO URBANO ===== */
+.wayvo-stage { background:#ced9c5; background-image:radial-gradient(#365c4724 1px,transparent 1px),linear-gradient(125deg,#dfe8d6,#adbea7); background-size:22px 22px,100% 100%; }
+.wayvo-app-shell { background:#edf1e4; border-left:2px solid #244b39; border-right:2px solid #244b39; }
+.wayvo-app-banner { z-index:30; flex:none; min-height:64px; display:flex; align-items:center; gap:10px; padding:9px 17px; color:#fffdf1; background:#1b4935; border-bottom:4px solid #e2ce79; box-shadow:0 3px 0 #315e47; }
+.wayvo-banner-mark { display:flex;align-items:center;justify-content:center;width:39px;height:39px;flex-shrink:0;background:#e6d681;color:#1d4935;border:2px solid #f9f3cb;border-radius:9px;box-shadow:3px 3px 0 #0c3022;font-family:Georgia,serif;font-size:25px;font-weight:900; }
+.wayvo-banner-mark span {font:900 12px sans-serif;align-self:flex-start;margin-top:3px} 
+.wayvo-app-banner strong {display:block;font-family:Georgia,serif;font-size:21px;letter-spacing:2.4px;line-height:1.15}
+.wayvo-app-banner small {display:block;font-size:8px;letter-spacing:1.1px;font-weight:800;color:#d6e7ba;white-space:nowrap}
+.wayvo-banner-route {margin-left:auto;color:#e6d681;letter-spacing:0;font-size:10px;white-space:nowrap}
+.wayvo-screen-content { min-height:0; }
+.wayvo-screen-content > div {background-color:#f0f2e8;}
+.wayvo-screen-content > div.overflow-y-auto, .wayvo-screen-content > div > div.overflow-y-auto { background-image:radial-gradient(#58806319 1px,transparent 1px);background-size:19px 19px; }
+.wayvo-screen-content .wayvo-ticket-card {border:1.5px solid #a9bda7;box-shadow:4px 4px 0 #b8c9ae;border-radius:15px;background-color:#fffef7;transition:transform .15s ease,box-shadow .15s ease;}
+.wayvo-screen-content .wayvo-ticket-card:has(> button:hover) {box-shadow:5px 5px 0 #a6bca0;}
+.wayvo-screen-content .wayvo-section-label {display:flex;align-items:center;gap:9px;color:#28563e;letter-spacing:1.5px;font-weight:900;}
+.wayvo-screen-content .wayvo-section-label::before {content:'';height:10px;width:4px;border-radius:1px;background:#d8ac50;flex-shrink:0;}
+.wayvo-screen-content h1,.wayvo-screen-content h2,.wayvo-screen-content h3 {letter-spacing:-.45px;color:#183f2e;}
+.wayvo-screen-content button.bg-green-700,.wayvo-screen-content button.bg-green-800,.wayvo-screen-content button[class*='bg-green-700'] {background:#286447;border:1px solid #19432f;box-shadow:3px 3px 0 #173d2e;border-radius:12px;}
+.wayvo-screen-content button.bg-green-700:active,.wayvo-screen-content button[class*='bg-green-700']:active {transform:translate(2px,2px);box-shadow:1px 1px 0 #173d2e;}
+.wayvo-screen-content button:focus-visible,.wayvo-bottom-nav button:focus-visible {outline:3px solid #d0a84f;outline-offset:2px;}
+.wayvo-screen-content input:not([type='checkbox']),.wayvo-screen-content textarea,.wayvo-screen-content select {background-color:#fbfcf3;border-color:#adbea7;color:#1b4634;}
+.wayvo-screen-content input:focus,.wayvo-screen-content textarea:focus {outline-color:#2c6a4a;}
+.wayvo-screen-content .bg-white {background-color:#fffef7;}
+.wayvo-screen-content .bg-gray-50 {background-color:#eff2e8;}
+.wayvo-screen-content .text-gray-900 {color:#213e2f;}
+.wayvo-screen-content .text-gray-400 {color:#677b68;}
+.wayvo-screen-content .border-gray-100 {border-color:#d5decb;}
+.wayvo-screen-content .bg-green-50 {background-color:#e2edce;}
+.wayvo-screen-content .text-green-700 {color:#225b3c;}
+.wayvo-bottom-nav {background:#fffdf1;border-top:2px dashed #95ad8a;padding:5px 5px max(6px,env(safe-area-inset-bottom));box-shadow:0 -5px 0 #e3ead8;}
+.wayvo-bottom-nav .wayvo-nav-item {color:#617e68;border-radius:10px;min-width:0;position:relative;}
+.wayvo-bottom-nav .wayvo-nav-item[aria-current='page'] {background:#e6efcf;color:#194a33;}
+.wayvo-bottom-nav .wayvo-nav-item[aria-current='page']::before {content:'';position:absolute;top:2px;width:19px;height:3px;background:#c7a04d;border-radius:3px;}
+.wayvo-bottom-nav .wayvo-nav-item span {letter-spacing:.1px;}
+.wayvo-screen-content [class*='rounded-full'].bg-white {border-color:#b0c4aa;}
+@media(min-width:600px){.wayvo-app-shell {border-radius:16px;max-height:920px;align-self:center;height:min(100vh,920px);box-shadow:13px 13px 0 #476a4d,0 28px 80px #14291d55;}}
+@media(max-width:365px){.wayvo-app-banner {padding:8px 11px}.wayvo-app-banner small {font-size:7px}.wayvo-banner-route{display:none;}}
+@media(prefers-reduced-motion:reduce){.wayvo-screen-content .wayvo-ticket-card,.wayvo-screen-content button {transition:none!important}}

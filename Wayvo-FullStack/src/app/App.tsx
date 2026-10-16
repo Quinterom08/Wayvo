@@ -208,11 +208,11 @@ function Chip({children, active, color, onClick}: {children: React.ReactNode; ac
 }
 
 function SectionLabel({children}: {children: React.ReactNode}) {
-  return <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-widest mb-3">{children}</p>;
+  return <p className="wayvo-section-label text-[11px] font-semibold text-gray-400 uppercase tracking-widest mb-3">{children}</p>;
 }
 
 function Card({children, className=""}: {children: React.ReactNode; className?: string}) {
-  return <div className={`bg-white rounded-2xl shadow-sm border border-black/[0.07] ${className}`}>{children}</div>;
+  return <div className={`wayvo-ticket-card bg-white rounded-2xl shadow-sm border border-black/[0.07] ${className}`}>{children}</div>;
 }
 
 // ─── MODAL ────────────────────────────────────────────────────────────────────
@@ -1532,11 +1532,12 @@ function BottomNav({active, onSwitch, user}: {active: TabId; onSwitch: (t: TabId
     tabs.push(["admin", Shield, "Admin"]);
   }
   return (
-    <nav className="flex-shrink-0 bg-white border-t border-gray-100 shadow-[0_-1px_0_rgba(0,0,0,0.05)]">
+    <nav aria-label="Navegación principal" className="wayvo-bottom-nav flex-shrink-0 bg-white border-t border-gray-100 shadow-[0_-1px_0_rgba(0,0,0,0.05)]">
       <div className="flex">
         {tabs.map(([id, Icon, label]) => (
           <button key={id} onClick={()=>onSwitch(id)}
-            className={`flex-1 flex flex-col items-center justify-center py-2.5 gap-0.5 transition-colors ${active===id?"text-green-700":"text-gray-400 hover:text-gray-600"}`}>
+            aria-current={active===id ? "page" : undefined}
+            className={`wayvo-nav-item flex-1 flex flex-col items-center justify-center py-2.5 gap-0.5 transition-colors ${active===id?"text-green-700":"text-gray-400 hover:text-gray-600"}`}>
             <Icon className="w-5 h-5" strokeWidth={active===id?2.5:1.5}/>
             <span className={`text-[10px] ${active===id?"font-bold":"font-medium"}`}>{label}</span>
           </button>
@@ -1649,9 +1650,10 @@ export default function App() {
   };
 
   return (
-    <div className="h-screen bg-gray-300 flex justify-center overflow-hidden" style={{fontFamily:"'DM Sans',system-ui,sans-serif"}}>
-      <div className="relative w-full max-w-sm h-full bg-white flex flex-col overflow-hidden shadow-2xl">
-        <div className="flex-1 flex flex-col overflow-hidden">{renderScreen()}</div>
+    <div className="wayvo-stage h-screen bg-gray-300 flex justify-center overflow-hidden" style={{fontFamily:"'DM Sans',system-ui,sans-serif"}}>
+      <div className="wayvo-app-shell relative w-full max-w-sm h-full bg-white flex flex-col overflow-hidden shadow-2xl">
+        <div className="wayvo-app-banner" aria-label="Wayvo, tu ciudad en movimiento"><span className="wayvo-banner-mark">W<span>↗</span></span><div><strong>WAYVO</strong><small>LA CIUDAD ES TUYA · EDICIÓN 2026</small></div><span className="wayvo-banner-route" aria-hidden="true">● ─ ─ ●</span></div>
+        <div className="wayvo-screen-content flex-1 flex flex-col overflow-hidden">{renderScreen()}</div>
         <BottomNav active={tab} onSwitch={switchTab} user={user}/>
       </div>
     </div>
