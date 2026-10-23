@@ -12,8 +12,24 @@ from pathlib import Path
 from urllib.parse import unquote, urlsplit, urlencode, parse_qs
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError
+from assistant_chat import chat_reply
 
 BASE = Path(__file__).resolve().parent
+
+def load_local_env():
+    # Convenience for local demo only: read KEY=VALUE entries, NEVER execute code.
+    # Environment settings set by deployment take precedence.
+    env_file = BASE / '.env'
+    if not env_file.is_file(): return
+    for line in env_file.read_text(encoding='utf-8').splitlines():
+        line=line.strip()
+        if not line or line.startswith('#') or '=' not in line: continue
+        key,value=line.split('=',1)
+        key=key.strip();value=value.strip().strip('\"').strip("'")
+        if key and all(c.isupper() or c.isdigit() or c=='_' for c in key):
+            os.environ.setdefault(key,value)
+
+load_local_env()
 DB = Path(os.environ.get('WAYVO_DB', str(BASE / 'wayvo.sqlite3')))
 PORT = int(os.environ.get('WAYVO_PORT', '8000'))
 HOST = os.environ.get('WAYVO_HOST', '127.0.0.1')
@@ -207,6 +223,24 @@ class Handler(BaseHTTPRequestHandler):
                     db.execute('DELETE FROM oauth_tickets WHERE ticket_hash=?',(digest,))
                     row=db.execute('SELECT * FROM users WHERE id=?',(pending['user_id'],)).fetchone()
                     return self.send(200,{'token':issue_token(db,row['id']),'user':public_user(row)})
+                if path == '/api/assistant/chat' and method == 'POST':
+                    if not self.current_user(db): return self.send(401,{'error':'Debes iniciar sesión'})
+                    raw=data.get('messages')
+                    if not isinstance(raw,list) or not 1<=len(raw)<=30:
+                        return self.send(400,{'error':'Envía entre 1 y 30 mensajes de chat'})
+                    messages=[]
+                    for item in raw[-12:]:
+                        if not isinstance(item,dict) or item.get('role') not in ('user','assistant') or not isinstance(item.get('content'),str):
+                            return self.send(400,{'error':'Formato de chat inválido'})
+                        content=item['content'].strip()
+                        if not content or len(content)>1000:return self.send(400,{'error':'Mensaje vacío o demasiado largo'})
+                        messages.append({'role':item['role'],'content':content})
+                    if messages[-1]['role']!='user':return self.send(400,{'error':'El último mensaje debe ser del usuario'})
+                    loc=data.get('location')
+                    if not isinstance(loc,dict) or not all(isinstance(loc.get(k),(int,float)) for k in ('latitude','longitude')):
+                        loc=None
+                    elif not (-90<=loc['latitude']<=90 and -180<=loc['longitude']<=180):loc=None
+                    return self.send(200,chat_reply(messages,loc,fetch_json))
                 if path == '/api/assistant/routes' and method == 'POST':
                     if not self.current_user(db): return self.send(401,{'error':'Debes iniciar sesión'})
                     origin=str(data.get('origin','')).strip()[:160]; dest=str(data.get('destination','')).strip()[:160]

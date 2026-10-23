@@ -88,3 +88,23 @@
 @media(min-width:600px){.wayvo-app-shell {border-radius:16px;max-height:920px;align-self:center;height:min(100vh,920px);box-shadow:13px 13px 0 #476a4d,0 28px 80px #14291d55;}}
 @media(max-width:365px){.wayvo-app-banner {padding:8px 11px}.wayvo-app-banner small {font-size:7px}.wayvo-banner-route{display:none;}}
 @media(prefers-reduced-motion:reduce){.wayvo-screen-content .wayvo-ticket-card,.wayvo-screen-content button {transition:none!important}}
+
+/* Wayvo 0.7: map-first retro dashboard and full conversational assistant */
+.wayvo-home {background:#edf1e4;background-image:radial-gradient(#55775915 1px,transparent 1px);background-size:18px 18px;}
+.wayvo-home-map {height:clamp(305px,42vh,410px);border:3px solid #1b4935;box-shadow:6px 6px 0 #a5b99c;background:#e0e8d8;}
+.wayvo-chat-home-cta {background:#245a3f;color:#fffdf1;border:2px solid #143e2c;box-shadow:5px 5px 0 #b3c9a6;transition:transform .12s,box-shadow .12s;}
+.wayvo-chat-home-cta:active {transform:translate(3px,3px);box-shadow:2px 2px 0 #b3c9a6;}
+.wayvo-home-action {background:#fffdf1;border:1.5px solid #8eaa8d;box-shadow:4px 4px 0 #b6c8ab;transition:transform .12s,box-shadow .12s;}
+.wayvo-home-action:hover {transform:translateY(-2px);box-shadow:4px 6px 0 #a7bfa6;}
+.wayvo-chat-scroll {background:linear-gradient(#edf1e4bb,#edf1e4ee),radial-gradient(#315f4429 1px,transparent 1px);background-size:100% 100%,19px 19px;overscroll-behavior:contain;}
+.wayvo-chat-bubble {font-size:13px;line-height:1.55;padding:13px 15px;white-space:pre-wrap;overflow-wrap:anywhere;max-width:83%;border:1.5px solid;}
+.wayvo-chat-user {background:#256243;color:#fffdf1;border-color:#133c2b;border-radius:16px 16px 4px 16px;box-shadow:2px 3px 0 #b3c9a6;}
+.wayvo-chat-assistant {background:#fffdf1;color:#254331;border-color:#adc0a5;border-radius:4px 16px 16px 16px;box-shadow:3px 3px 0 #d0dfc5;}
+.wayvo-chat-suggestion {background:#fffdf1;color:#214d34;border:1px solid #9db59e;box-shadow:2px 2px 0 #b4c8af;}
+.wayvo-chat-suggestion:hover {background:#e8efdc;}
+.wayvo-chat-icon-button {height:44px;width:44px;flex-shrink:0;display:flex;align-items:center;justify-content:center;background:#e2ecd7;color:#1c5139;border:1.5px solid #8da891;border-radius:12px;}
+.wayvo-chat-input {background:#f5f6eb;border:1.5px solid #a1b49b;color:#1b4935;}
+.wayvo-chat-input:focus {border-color:#1b4935;outline:2px solid #c7d9b9;}
+.wayvo-chat-send {background:#236344;border:1.5px solid #163b29;box-shadow:2px 2px 0 #143e2b;}
+.wayvo-map-wrap {background:#e4ebe0;}
+.wayvo-map-screen .wayvo-map-wrap {min-height:0;}

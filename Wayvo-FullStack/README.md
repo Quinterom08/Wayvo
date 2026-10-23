@@ -1,3 +1,7 @@
+# NUEVA ACTUALIZACIÓN: MAPA + WAYVO IA
+
+Consulta [ACTUALIZACION_MAPA_IA.md](ACTUALIZACION_MAPA_IA.md) para el nuevo inicio con Google Maps configurable, chat de Wayvo IA y pasos de configuración.
+
 # Wayvo — frontend + backend
 
 Aplicación de transporte urbano basada en la interfaz React recibida. Conserva el diseño y navegación originales, y añade una API persistente para autenticación y administración.

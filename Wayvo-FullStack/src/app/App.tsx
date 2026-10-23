@@ -4,8 +4,9 @@ import {
   Clock, ArrowRight, Info, AlertCircle, Settings, LogOut, X,
   Wallet, Loader2, Shield, Navigation2, CheckCircle,
   Plus, Eye, Trash2, Edit2, Navigation,
-  Bookmark, Volume2, Moon, Globe, ChevronDown, Bot, LocateFixed,
+  Bookmark, Volume2, Moon, Globe, ChevronDown, Bot, LocateFixed, Send, Sparkles, MessageCircle,
 } from "lucide-react";
+import {WayvoGoogleMap} from "./components/WayvoGoogleMap";
 
 // ─── TYPES ────────────────────────────────────────────────────────────────────
 
@@ -14,7 +15,7 @@ type Screen =
   | "map" | "trips" | "fares" | "notifications"
   | "profile" | "admin" | "favorites" | "settings" | "assistant";
 
-type TabId = "home" | "routes" | "map" | "trips" | "profile" | "admin";
+type TabId = "home" | "assistant" | "routes" | "map" | "trips" | "profile" | "admin";
 type AuthRole = "client" | "worker";
 type AuthMode = "login" | "register" | "forgot" | "sent";
 
@@ -570,146 +571,88 @@ function MapScreen({busPositions, activeRoute, onRouteChange}: {
   activeRoute: string|null;
   onRouteChange: (id: string|null) => void;
 }) {
-  const activeRouteData = ROUTES.find(r => r.id === activeRoute);
-  const activeBusCount = busPositions.filter(b => activeRoute ? b.routeId === activeRoute : true).length;
-  const hLines = [110,170,230,290,350,410,470,530,590,645];
-  const vLines = [270,330,390,440,510,570,630,678];
-
-  return (
-    <div className="flex-1 flex flex-col overflow-hidden relative">
-      {/* Fondo SVG estático — dibujo de la ciudad */}
-      <svg viewBox="0 0 900 680" className="absolute inset-0 w-full h-full" style={{background:"#EAE6DC", zIndex:1}}>
-        {/* Montañas laterales */}
-        <polygon points="0,680 0,130 42,108 78,85 112,68 142,78 165,58 182,75 196,55 208,74 214,98 218,130 220,680" fill="#D5D0C4"/>
-        <polygon points="900,680 900,130 858,108 822,85 788,68 758,78 735,58 718,75 704,55 692,74 686,98 682,130 680,680" fill="#D5D0C4"/>
-        {/* Cuadrícula de manzanas */}
-        {hLines.map(y => <line key={`h${y}`} x1="220" y1={y} x2="680" y2={y} stroke="#C5C0B2" strokeWidth="0.5"/>)}
-        {vLines.map(x => <line key={`v${x}`} x1={x} y1="80" x2={x} y2="652" stroke="#C5C0B2" strokeWidth="0.5"/>)}
-        {/* Ejes principales */}
-        <line x1="220" y1="330" x2="680" y2="330" stroke="#B0AB9C" strokeWidth="2"/>
-        <line x1="440" y1="80" x2="440" y2="652" stroke="#B0AB9C" strokeWidth="2"/>
-        {/* Etiquetas de barrios */}
-        {NBHDS.map(n => (
-          <text key={n.label} x={n.x} y={n.y} textAnchor="middle" fontSize="9" fontWeight="600"
-            fill="#8C8779" style={{fontFamily:"'DM Sans',sans-serif",letterSpacing:"0.06em"}}
-            opacity={0.75}>{n.label}</text>
-        ))}
-        {/* Rutas dibujadas */}
-        {ROUTES.map(r => {
-          const dimmed = activeRoute !== null && activeRoute !== r.id;
-          return <path key={r.id} d={toPath(r.waypoints)} fill="none" stroke={r.color}
-            strokeWidth={activeRoute === r.id ? 5 : 3}
-            strokeLinecap="round" strokeLinejoin="round"
-            opacity={dimmed ? 0.12 : activeRoute === r.id ? 1 : 0.65}
-            style={{transition:"opacity 0.3s,stroke-width 0.3s"}}/>;
-        })}
-        {/* Paradas de ruta activa */}
-        {activeRoute && ROUTES.find(r => r.id === activeRoute)?.waypoints.map((pt, i) => {
-          const rc = ROUTES.find(r => r.id === activeRoute)!;
-          return <circle key={i} cx={pt[0]} cy={pt[1]} r={4} fill="white" stroke={rc.color} strokeWidth={2} opacity={0.9}/>;
-        })}
-        {/* Buses animados */}
-        {busPositions.map(bus => {
-          const route = ROUTES.find(r => r.id === bus.routeId);
-          if (!route) return null;
-          if (activeRoute !== null && activeRoute !== bus.routeId) return null;
-          return (
-            <g key={bus.id} transform={`translate(${bus.x},${bus.y})`}
-              style={{cursor:"pointer"}}
-              onClick={() => onRouteChange(activeRoute === bus.routeId ? null : bus.routeId)}>
-              <circle r={9} fill={route.color} stroke="white" strokeWidth={2}/>
-              <text textAnchor="middle" dy="4" fontSize="6" fontWeight="700" fill="white"
-                style={{fontFamily:"'Space Mono',monospace",pointerEvents:"none"}}>{bus.routeId}</text>
-            </g>
-          );
-        })}
-        {/* Punto de ubicación central */}
-        <g transform="translate(440,330)">
-          <circle r={11} fill="#2E7D32" opacity={0.15}/>
-          <circle r={6} fill="#2E7D32" stroke="white" strokeWidth={2.5}/>
-        </g>
-      </svg>
-
-      {/* Search bar overlay */}
-      <div className="absolute top-3 left-3 right-3 flex items-center gap-2" style={{zIndex:20}}>
-        <div className="flex-1 flex items-center gap-2 bg-white/95 border border-gray-200 rounded-2xl px-4 py-2.5 shadow-md">
-          <Search className="w-4 h-4 text-gray-400 flex-shrink-0"/>
-          <span className="text-sm text-gray-400">
-            {activeRouteData ? `Ruta ${activeRouteData.id} — ${activeRouteData.name}` : "Buscar en el mapa..."}
-          </span>
-        </div>
-        <button onClick={() => onRouteChange(null)}
-          className="w-10 h-10 bg-green-700 rounded-2xl flex items-center justify-center shadow-md flex-shrink-0"
-          style={{zIndex:20}}>
-          <Navigation2 className="w-5 h-5 text-white" strokeWidth={1.5}/>
-        </button>
-      </div>
-
-      {/* Active buses badge */}
-      {activeRouteData && (
-        <div className="absolute top-16 left-3 flex items-center gap-2 bg-white rounded-xl px-3 py-2 shadow-md border border-gray-100" style={{zIndex:20}}>
-          <div className="w-2 h-2 rounded-full" style={{backgroundColor: activeRouteData.color}}/>
-          <span className="text-xs font-semibold text-gray-700">{activeBusCount} buses en ruta</span>
-        </div>
-      )}
-
-      {/* Route chips */}
-      <div className="absolute bottom-3 left-3 right-3" style={{zIndex:20}}>
-        <Card className="p-3">
-          <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-2">Filtrar ruta</p>
-          <div className="flex gap-2 overflow-x-auto pb-0.5">
-            <Chip active={activeRoute === null} onClick={() => onRouteChange(null)}>Todas</Chip>
-            {ROUTES.map(r => (
-              <Chip key={r.id} active={activeRoute === r.id} color={r.color}
-                onClick={() => onRouteChange(activeRoute === r.id ? null : r.id)}>
-                {r.id}
-              </Chip>
-            ))}
-          </div>
-        </Card>
-      </div>
+  return <div className="wayvo-map-screen flex-1 flex flex-col relative min-h-0 bg-[#e8eddc]">
+    <div className="flex-1 relative min-h-0">
+      <WayvoGoogleMap activeRoute={activeRoute} fallback={<MiniTransitMap busPositions={busPositions}/>}/>
     </div>
-  );
+    <div className="shrink-0 px-4 pt-3 pb-4 bg-[#fffdf1] border-t-2 border-[#1b4935]">
+      <div className="flex items-center justify-between mb-2">
+        <span className="font-black text-sm text-[#1b4935]">Explorar líneas de prueba</span>
+        <span className="text-[10px] text-[#64806c]">NO OFICIALES</span>
+      </div>
+      <div className="flex gap-2 overflow-x-auto pb-1">
+        <Chip active={activeRoute===null} onClick={()=>onRouteChange(null)}>Todas</Chip>
+        {ROUTES.map(r=><Chip key={r.id} active={activeRoute===r.id} color={r.color}
+          onClick={()=>onRouteChange(activeRoute===r.id?null:r.id)}>{r.id}</Chip>)}
+      </div>
+      <p className="text-[10px] text-[#748474] mt-2">Las líneas dibujadas y los buses son ejemplos del proyecto de grado, no información en tiempo real.</p>
+    </div>
+  </div>;
 }
 
 // ─── HOME SCREEN ──────────────────────────────────────────────────────────────
 
+type ChatMessage = {role:"user"|"assistant"; content:string};
+const CHAT_WELCOME:ChatMessage = {role:"assistant",content:"¡Hola! Soy Wayvo IA 🚌💚. ¿Qué te gustaría saber hoy? Puedo ayudarte con rutas de demostración, paraderos, tarifas o simplemente conversar."};
+const CHAT_SUGGESTIONS=["¿Cómo llego de Bello a Envigado?","¿Cuánto cuesta el pasaje?","¿Qué rutas tienes?","¿Qué es Wayvo?"];
 function AssistantScreen({onBack}: {onBack: () => void}) {
-  const [origin,setOrigin]=useState("");
-  const [destination,setDestination]=useState("");
+  const [messages,setMessages]=useState<ChatMessage[]>(()=>{
+    try {const saved=JSON.parse(sessionStorage.getItem('wayvo_chat')||'null');
+      if(Array.isArray(saved) && saved.length>0 && saved.length<=50 && saved.every((m:any)=>m && ['user','assistant'].includes(m.role) && typeof m.content==='string'))return saved;
+    }catch(_){} return [CHAT_WELCOME];
+  });
+  const [draft,setDraft]=useState('');
   const [location,setLocation]=useState<{latitude:number;longitude:number}|undefined>();
   const [loading,setLoading]=useState(false);
-  const [message,setMessage]=useState("");
-  const [routes,setRoutes]=useState<Array<{nombre:string;origen:string;destino:string;paraderos:string}>>([]);
-  const [error,setError]=useState("");
-  const useLocation=() => {
-    setError("");
-    navigator.geolocation.getCurrentPosition(p=>{
-      setLocation({latitude:p.coords.latitude,longitude:p.coords.longitude});
-      setOrigin("Mi ubicación");
-    },()=>setError("No se pudo acceder al GPS. Revisa los permisos de ubicación."),{enableHighAccuracy:true,timeout:12000});
-  };
-  const ask=async () => {
-    setLoading(true);setError("");setMessage("");setRoutes([]);
+  const [error,setError]=useState('');
+  const bottom=useRef<HTMLDivElement>(null);
+  useEffect(()=>{sessionStorage.setItem('wayvo_chat',JSON.stringify(messages.slice(-30)));bottom.current?.scrollIntoView({behavior:'smooth',block:'end'});},[messages]);
+  const send=async (proposal?:string, overrideLocation?:{latitude:number;longitude:number})=>{
+    const text=(proposal??draft).trim();
+    if(!text||loading)return;
+    const outgoing=[...messages.filter(m=>m.content!==CHAT_WELCOME.content),{role:'user' as const,content:text}].slice(-20);
+    setMessages(prev=>[...prev,{role:'user' as const,content:text}]);setDraft('');setError('');setLoading(true);
     try {
-      const result=await api<{answer:string;routes:typeof routes}>("/assistant/routes",{method:"POST",body:JSON.stringify({origin,destination,location})});
-      setMessage(result.answer);setRoutes(result.routes||[]);
-    } catch(e) {setError(e instanceof Error?e.message:"Error de conexión");}
-    finally {setLoading(false);}
+      const result=await api<{answer:string;source:string}>("/assistant/chat",{method:"POST",body:JSON.stringify({messages:outgoing,location:overrideLocation??location})});
+      setMessages(prev=>[...prev,{role:'assistant' as const,content:result.answer}]);
+    }catch(e){setError(e instanceof Error?e.message:'No se pudo conectar con Wayvo IA.');}
+    finally{setLoading(false);}
   };
-  return <div className="flex-1 overflow-y-auto bg-gray-50 p-5">
-    <div className="flex items-center gap-3 mb-6"><button onClick={onBack} aria-label="Volver"><ChevronLeft/></button><Bot className="text-green-700"/><h1 className="font-bold text-xl">Asistente de rutas</h1></div>
-    <div className="bg-white border border-gray-100 rounded-2xl p-4 space-y-3 shadow-sm">
-      <p className="text-sm text-gray-600">Dime desde dónde sales y adónde quieres llegar. Consultaré las rutas verificadas por Wayvo.</p>
-      <label className="block text-xs font-bold text-gray-700">Origen</label>
-      <div className="flex gap-2"><input aria-label="Origen" value={origin} onChange={e=>{setOrigin(e.target.value);setLocation(undefined);}} placeholder="Barrio, paradero o dirección" className="border rounded-xl p-3 text-sm min-w-0 flex-1"/><button onClick={useLocation} title="Usar ubicación actual" aria-label="Usar ubicación actual" className="border rounded-xl px-3 text-green-700"><LocateFixed size={18}/></button></div>
-      <label className="block text-xs font-bold text-gray-700">Destino</label>
-      <input aria-label="Destino" value={destination} onChange={e=>setDestination(e.target.value)} placeholder="¿A dónde quieres ir?" className="w-full border rounded-xl p-3 text-sm"/>
-      <button onClick={ask} disabled={loading || !origin.trim() || !destination.trim()} className="w-full rounded-xl bg-green-700 text-white font-bold py-3 disabled:opacity-50">{loading?"Consultando rutas...":"Preguntar a Wayvo"}</button>
+  const useLocation=()=>{
+    setError('');
+    if(!navigator.geolocation){setError('El dispositivo no dispone de GPS.');return;}
+    navigator.geolocation.getCurrentPosition(p=>{
+      const coords={latitude:p.coords.latitude,longitude:p.coords.longitude};
+      setLocation(coords);
+      void send('¿Dónde estoy? Comparto mi ubicación GPS.',coords);
+    },()=>setError('No se pudo acceder al GPS. Revisa los permisos y activa la ubicación.'),{enableHighAccuracy:true,timeout:12000});
+  };
+  return <div className="wayvo-chat-screen flex-1 flex flex-col min-h-0 bg-[#f0f2e8]">
+    <div className="shrink-0 bg-[#1b4935] text-[#fffdf1] px-4 pt-4 pb-4 border-b-4 border-[#e6d681] flex items-center gap-3">
+      <button type="button" onClick={onBack} aria-label="Volver" className="rounded-lg bg-white/10 p-2"><ChevronLeft size={19}/></button>
+      <div className="bg-[#e6d681] text-[#1b4935] rounded-xl w-11 h-11 flex items-center justify-center border border-[#fff2bd]"><Bot size={25}/></div>
+      <div className="flex-1"><h1 className="!text-[#fffdf1] text-lg font-black leading-tight">Wayvo IA</h1><p className="text-[11px] text-[#d7e8ce]">Tu copiloto urbano · Chat inteligente</p></div>
+      <Sparkles size={20} className="text-[#e6d681]"/>
     </div>
-    {error && <p role="alert" className="mt-4 text-sm text-red-600">{error}</p>}
-    {message && <div aria-live="polite" className="bg-white rounded-2xl p-4 mt-4 border border-gray-100"><p className="text-sm text-gray-800 whitespace-pre-wrap">{message}</p>{routes.map((r,i)=><div key={i} className="border-t mt-3 pt-3 text-xs text-gray-700"><strong>{r.nombre}</strong><div>{r.origen} → {r.destino}</div></div>)}</div>}
-    <p className="text-xs text-gray-500 mt-5">Las sugerencias dependen de las rutas registradas; no representan datos en vivo. Verifica horarios y paraderos antes de viajar. El GPS requiere permisos y datos geográficos para resolver paraderos cercanos.</p>
+    <div className="wayvo-chat-scroll flex-1 min-h-0 overflow-y-auto px-4 py-5 space-y-4" aria-live="polite" aria-label="Mensajes del chat">
+      <div className="flex justify-center"><span className="rounded-full text-[10px] font-black tracking-wide px-3 py-1 border border-[#acc3a2] bg-[#e1ebd5] text-[#2a5b40]">DEMOSTRACIÓN ACADÉMICA</span></div>
+      {messages.map((m,i)=><div key={i} className={`flex ${m.role==='user'?'justify-end':'justify-start'}`}>
+        {m.role==='assistant'&&<div className="w-7 h-7 bg-[#e6d681] border border-[#1b4935] rounded-lg mr-2 flex items-center justify-center shrink-0"><Bot size={16} className="text-[#1b4935]"/></div>}
+        <div className={`wayvo-chat-bubble ${m.role==='user'?'wayvo-chat-user':'wayvo-chat-assistant'}`}>{m.content}</div>
+      </div>)}
+      {loading&&<div className="flex items-center gap-2 text-[#43664d] text-xs"><Loader2 size={17} className="animate-spin"/> Wayvo está escribiendo...</div>}
+      {messages.length===1&&<div className="pt-3"><p className="font-extrabold text-[#38614a] text-xs mb-3">PRUEBA CON UNA PREGUNTA</p><div className="grid grid-cols-1 gap-2">{CHAT_SUGGESTIONS.map(q=><button key={q} type="button" onClick={()=>void send(q)} className="wayvo-chat-suggestion text-left text-xs font-semibold px-4 py-3 rounded-xl">{q} <ArrowRight size={13} className="inline ml-1"/></button>)}</div></div>}
+      <div ref={bottom}/>
+    </div>
+    {error&&<p role="alert" className="px-4 py-2 text-xs font-semibold bg-red-50 text-red-700 border-t border-red-100">{error}</p>}
+    <form onSubmit={e=>{e.preventDefault();void send();}} className="shrink-0 px-3 pt-3 pb-2 bg-[#fffdf1] border-t-2 border-[#b6c8ab]">
+      <div className="flex items-end gap-2">
+        <button type="button" onClick={useLocation} title="Compartir mi ubicación GPS" aria-label="Compartir mi ubicación GPS" disabled={loading} className="wayvo-chat-icon-button"><LocateFixed size={20}/></button>
+        <textarea aria-label="Escribe tu mensaje" value={draft} onChange={e=>setDraft(e.target.value)} maxLength={700} rows={1} placeholder="Pregúntame lo que quieras..." onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();void send();}}} className="wayvo-chat-input flex-1 resize-none max-h-28 min-h-[43px] py-3 px-3 text-sm rounded-xl outline-none"/>
+        <button type="submit" disabled={loading||!draft.trim()} aria-label="Enviar mensaje" className="wayvo-chat-send h-11 w-11 rounded-xl text-[#fffdf1] flex items-center justify-center disabled:opacity-50"><Send size={18}/></button>
+      </div>
+      <p className="text-center text-[10px] text-[#66806c] mt-2">Rutas ficticias · El GPS no identifica paraderos sin geocodificación</p>
+    </form>
   </div>;
 }
 
@@ -717,112 +660,37 @@ function HomeScreen({user, busPositions, unread, onNavigate}: {
   user: AppUser; busPositions: BusPos[]; unread: number;
   onNavigate: (s: Screen|TabId) => void;
 }) {
-  const [search, setSearch] = useState("");
   const quickActions = [
-    {icon: Bot, label:"Preguntar a IA", dest:"assistant", bg:"bg-green-50", fg:"text-green-700"},
-    {icon: Navigation, label:"Rutas y líneas",   dest:"routes",    bg:"bg-blue-50",   fg:"text-blue-600"},
-    {icon: MapPin,     label:"Ubicación buses",  dest:"map",       bg:"bg-green-50",  fg:"text-green-600"},
-    {icon: Wallet,     label:"Tarifas",          dest:"fares",     bg:"bg-amber-50",  fg:"text-amber-600"},
-    {icon: Bookmark,   label:"Mis favoritos",    dest:"favorites", bg:"bg-purple-50", fg:"text-purple-600"},
+    {icon:Bot,label:"Wayvo IA",detail:"Pregúntame lo que quieras",dest:"assistant",bg:"#dcebc8"},
+    {icon:Bus,label:"Vehículos",detail:"Buses del prototipo",dest:"vehicles",bg:"#e9e0b6"},
+    {icon:Map,label:"Ver mapa",detail:"Explora la ciudad",dest:"map",bg:"#d3e3db"},
+    {icon:Wallet,label:"Tarifas",detail:"Valores de prueba",dest:"fares",bg:"#f0dfb8"},
+    {icon:Bookmark,label:"Favoritos",detail:"Tus rutas guardadas",dest:"favorites",bg:"#e1dcc9"},
+    {icon:Bell,label:"Avisos",detail:"Novedades de Wayvo",dest:"notifications",bg:"#e9dcbd"},
   ] as const;
-  const alerts = NOTIFS_DATA.filter(n => !n.leida).slice(0, 2);
-
-  return (
-    <div className="flex-1 overflow-y-auto bg-gray-50">
-      <div className="flex items-center justify-between px-4 pt-5 pb-2">
-        <div>
-          <p className="text-xs text-gray-400 font-medium">Bienvenido de nuevo</p>
-          <h1 className="text-xl font-bold text-gray-900 mt-0.5">{user.name} 👋</h1>
-        </div>
-        <button onClick={() => onNavigate("notifications")}
-          className="relative w-10 h-10 rounded-full bg-white border border-gray-100 shadow-sm flex items-center justify-center">
-          <Bell className="w-5 h-5 text-gray-600" strokeWidth={1.5}/>
-          {unread > 0 && (
-            <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] bg-red-500 rounded-full text-[10px] text-white font-bold flex items-center justify-center px-1">
-              {unread}
-            </span>
-          )}
-        </button>
-      </div>
-
-      <div className="px-4 mt-3 mb-4">
-        <div className="flex items-center gap-3 bg-white rounded-2xl px-4 py-3 border border-gray-100 shadow-sm">
-          <Search className="w-4 h-4 text-gray-400 flex-shrink-0"/>
-          <input value={search} onChange={e => setSearch(e.target.value)}
-            onKeyDown={e => e.key === "Enter" && search.trim() && onNavigate("trips")}
-            placeholder="Buscar ruta, línea o destino..."
-            className="flex-1 bg-transparent text-sm outline-none placeholder:text-gray-400"/>
-          {search && <button onClick={() => setSearch("")}><X className="w-4 h-4 text-gray-400"/></button>}
-        </div>
-      </div>
-
-      <div className="px-4 mb-5">
-        <button onClick={() => onNavigate("trips")}
-          className="w-full bg-green-700 text-white rounded-2xl py-4 px-5 flex items-center justify-between hover:bg-green-800 transition-colors shadow-md shadow-green-900/20">
-          <div>
-            <p className="text-base font-bold">Planificar viaje</p>
-            <p className="text-white/70 text-xs mt-0.5">¿A dónde vas hoy?</p>
-          </div>
-          <div className="w-9 h-9 rounded-xl bg-white/20 flex items-center justify-center">
-            <ArrowRight className="w-5 h-5 text-white"/>
-          </div>
-        </button>
-      </div>
-
-      <div className="px-4 mb-5">
-        <SectionLabel>Acceso rápido</SectionLabel>
-        <div className="grid grid-cols-2 gap-2.5">
-          {quickActions.map(q => (
-            <button key={q.label} onClick={() => onNavigate(q.dest as Screen)}
-              className="bg-white rounded-2xl p-4 flex flex-col items-start gap-2.5 border border-gray-100 shadow-sm hover:shadow-md transition-shadow text-left">
-              <div className={`w-9 h-9 rounded-xl flex items-center justify-center ${q.bg}`}>
-                <q.icon className={`w-5 h-5 ${q.fg}`} strokeWidth={1.5}/>
-              </div>
-              <span className="text-sm font-semibold text-gray-800 leading-tight">{q.label}</span>
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {alerts.length > 0 && (
-        <div className="px-4 mb-5">
-          <div className="flex items-center justify-between mb-3">
-            <SectionLabel>Información importante</SectionLabel>
-            <button onClick={() => onNavigate("notifications")} className="text-xs text-green-700 font-semibold -mt-3">Ver todas →</button>
-          </div>
-          <div className="space-y-2.5">
-            {alerts.map(a => (
-              <Card key={a.id} className="p-4">
-                <div className="flex items-start gap-3">
-                  <div className={`w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 ${a.tipo==="alerta"?"bg-red-50":"bg-blue-50"}`}>
-                    {a.tipo === "alerta" ? <AlertCircle className="w-4 h-4 text-red-500"/> : <Info className="w-4 h-4 text-blue-500"/>}
-                  </div>
-                  <div>
-                    <p className="text-sm font-semibold text-gray-900">{a.titulo}</p>
-                    <p className="text-xs text-gray-500 mt-0.5 leading-relaxed">{a.mensaje}</p>
-                    <p className="text-[11px] text-gray-400 mt-1.5">{a.fecha}</p>
-                  </div>
-                </div>
-              </Card>
-            ))}
-          </div>
-        </div>
-      )}
-
-      <div className="px-4 mb-6">
-        <div className="flex items-center justify-between mb-2">
-          <SectionLabel>Buses en tiempo real</SectionLabel>
-          <button onClick={() => onNavigate("map")} className="text-xs text-green-700 font-semibold -mt-3">Ver mapa →</button>
-        </div>
-        <div className="relative rounded-2xl overflow-hidden border border-gray-100 shadow-sm" style={{height:180}}>
-          <MiniTransitMap busPositions={busPositions}/>
-          <div className="absolute top-2 left-2 bg-amber-50 border border-amber-200 text-amber-700 text-[10px] font-semibold px-2.5 py-1 rounded-lg">
-            ⚠ Datos simulados
-          </div>
-        </div>
-      </div>
+  return <div className="wayvo-home flex-1 min-h-0 overflow-y-auto">
+    <div className="px-4 pt-4 pb-3 flex items-center justify-between">
+      <div><p className="text-[10px] font-extrabold tracking-[.16em] text-[#477154] uppercase">Tu ciudad, tu camino</p><h1 className="text-xl font-black !text-[#1b4935]">¡Hola, {user.name.split(' ')[0]}! <span aria-hidden="true">👋</span></h1></div>
+      <button onClick={()=>onNavigate('notifications')} aria-label="Ver notificaciones" className="relative rounded-xl p-2.5 border-2 border-[#1b4935] bg-[#fffdf1] text-[#1b4935] shadow-[3px_3px_0_#1b4935]"><Bell size={19}/>{unread>0&&<span className="absolute -right-1 -top-1 bg-[#c97f42] rounded-full w-5 h-5 flex items-center justify-center text-white text-[10px] font-black">{unread}</span>}</button>
     </div>
-  );
+    <div className="px-3"><div className="wayvo-home-map relative overflow-hidden rounded-[20px]">
+      <WayvoGoogleMap compact fallback={<MiniTransitMap busPositions={busPositions}/>}/>
+    </div></div>
+    <div className="px-4 pt-4 pb-2">
+      <button onClick={()=>onNavigate('assistant')} className="wayvo-chat-home-cta w-full flex items-center gap-3 text-left rounded-2xl px-4 py-4">
+        <div className="h-12 w-12 bg-[#e6d681] border-2 border-[#f6ecc5] rounded-xl flex items-center justify-center shrink-0"><MessageCircle size={26} className="text-[#1b4935]"/></div>
+        <div className="flex-1 min-w-0"><strong className="text-base block">¿A dónde vamos hoy?</strong><span className="text-xs text-[#dce9d4]">Pregúntale a Wayvo IA sobre cualquier ruta</span></div>
+        <ArrowRight size={21}/>
+      </button>
+    </div>
+    <div className="px-4 pt-5 pb-7"><div className="flex items-center justify-between mb-3"><SectionLabel>Explora Wayvo</SectionLabel><span className="text-[10px] text-[#657f67] font-bold">TU PANEL DE VIAJE</span></div>
+      <div className="grid grid-cols-2 gap-3">{quickActions.map(item=><button key={item.label} onClick={()=>onNavigate(item.dest)} className="wayvo-home-action rounded-2xl p-3.5 text-left flex flex-col gap-2.5">
+        <div className="w-10 h-10 flex items-center justify-center rounded-xl border border-[#8dab8f]" style={{background:item.bg}}><item.icon size={20} className="text-[#214e36]" strokeWidth={2.2}/></div>
+        <div><strong className="text-sm block text-[#204a36]">{item.label}</strong><span className="text-[11px] text-[#627b65] leading-tight block mt-1">{item.detail}</span></div>
+      </button>)}</div>
+      <p className="mt-5 text-[11px] text-[#718374] text-center">Las rutas, vehículos y tarifas son datos simulados del proyecto de grado.</p>
+    </div>
+  </div>;
 }
 
 // ─── ROUTES SCREEN ────────────────────────────────────────────────────────────
@@ -1523,9 +1391,8 @@ function AdminScreen({onBack}: {onBack: () => void}) {
 function BottomNav({active, onSwitch, user}: {active: TabId; onSwitch: (t: TabId) => void; user: AppUser}) {
   const tabs: [TabId, React.FC<{className?:string;strokeWidth?:number}>, string][] = [
     ["home",    Home,        "Inicio"],
-    ["routes",  Navigation,  "Rutas"],
+    ["assistant",Bot,         "Wayvo IA"],
     ["map",     Map,         "Mapa"],
-    ["trips",   Navigation2, "Viajes"],
     ["profile", User,        "Perfil"],
   ];
   if (user.isAdmin) {
@@ -1583,20 +1450,18 @@ export default function App() {
   const unread = notifications.filter(n => !n.leida).length;
 
   useEffect(() => {
-    let raf: number;
-    const t0 = performance.now();
-    const tick = () => {
-      const elapsed = (performance.now() - t0) / 1000;
-      setBusPositions(BUS_DEFS.map(def => {
-        const route = ROUTES.find(r => r.id === def.routeId)!;
-        const t = ((def.phase + elapsed * def.speed) % 1 + 1) % 1;
-        const [x, y] = lerp(route.waypoints, t);
-        return {id: def.id, routeId: def.routeId, x, y};
+    const t0=performance.now();
+    const tick=()=>{
+      const elapsed=(performance.now()-t0)/1000;
+      setBusPositions(BUS_DEFS.map(def=>{
+        const route=ROUTES.find(r=>r.id===def.routeId)!;
+        const t=((def.phase+elapsed*def.speed)%1+1)%1;
+        const [x,y]=lerp(route.waypoints,t);
+        return {id:def.id,routeId:def.routeId,x,y};
       }));
-      raf = requestAnimationFrame(tick);
     };
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
+    tick();const id=window.setInterval(tick,400);
+    return ()=>window.clearInterval(id);
   }, []);
 
   const navigate = useCallback((s: Screen) => {
@@ -1629,7 +1494,7 @@ export default function App() {
 
   const renderScreen = () => {
     switch (screen) {
-      case "assistant": return <AssistantScreen onBack={goBack}/>;
+      case "assistant": return <AssistantScreen onBack={()=>screenStack.length?goBack():switchTab("home")}/>;
       case "notifications": return <NotificationsScreen notifications={notifications} onBack={goBack} onMarkRead={markRead}/>;
       case "fares":         return <FaresScreen onBack={goBack}/>;
       case "vehicles":      return <VehiclesScreen onBack={goBack} onViewMap={goToMap}/>;
@@ -1637,13 +1502,13 @@ export default function App() {
       case "favorites":     return <FavoritesScreen onBack={goBack} onViewRoute={goToRouteDetail} onViewMap={goToMap}/>;
       case "settings":      return <SettingsScreen onBack={goBack}/>;
       case "map":           return <MapScreen busPositions={busPositions} activeRoute={activeMapRoute} onRouteChange={setActiveMapRoute}/>;
-      case "trips":         return <TripsScreen onViewRoute={id=>{goToMap(id);}}/>;
+      case "trips":         return <AssistantScreen onBack={goBack}/>;
       case "route-detail":  return <RoutesScreen selected={selectedRoute} onSelect={r=>setSelectedRoute(r)} onBack={goBack} onViewMap={goToMap}/>;
       case "routes":        return <RoutesScreen selected={null} onSelect={r=>{setSelectedRoute(r);navigate("route-detail");}} onBack={goBack} onViewMap={goToMap}/>;
       case "profile":       return <ProfileScreen user={user} onNavigate={navigate} onLogout={()=>{ api("/auth/logout",{method:"POST"}).catch(()=>{}); clearSession(); setUser(null); }}/>;
       default:              return <HomeScreen user={user} busPositions={busPositions} unread={unread}
           onNavigate={dest=>{
-            const tabs=["home","routes","map","trips","profile","admin"];
+            const tabs=["home","assistant","routes","map","trips","profile","admin"];
             if(tabs.includes(dest)) switchTab(dest as TabId); else navigate(dest as Screen);
           }}/>;
     }
