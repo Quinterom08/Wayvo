@@ -1,6 +1,6 @@
-# NUEVA ACTUALIZACIÓN: MAPA + WAYVO IA
+# ACTUALIZACIÓN: OPENSTREETMAP + LEAFLET + WAYVO IA
 
-Consulta [ACTUALIZACION_MAPA_IA.md](ACTUALIZACION_MAPA_IA.md) para el nuevo inicio con Google Maps configurable, chat de Wayvo IA y pasos de configuración.
+Consulta **[ACTUALIZACION_OPENSTREETMAP.md](ACTUALIZACION_OPENSTREETMAP.md)** para el mapa interactivo gratuito sin clave de Google, el GPS y la selección de rutas simuladas. El chat Wayvo IA continúa disponible.
 
 # Wayvo — frontend + backend
 

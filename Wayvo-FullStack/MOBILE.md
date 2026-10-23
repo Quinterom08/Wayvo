@@ -56,6 +56,6 @@ La interfaz web original se ejecuta dentro de un contenedor móvil nativo. Las f
 - Pendiente de producción: vinculación segura de cuentas preexistentes, protección contra abuso/rate-limit, PostgreSQL y HTTPS en producción, revisión legal de ubicación, catálogo georreferenciado y horarios verificados, pruebas OAuth y GPS en dispositivos físicos. No son APK/IPA compilados.
 
 
-## Actualización: Google Maps + chat
+## Actualización: OpenStreetMap + Leaflet + chat
 
-Consulta [ACTUALIZACION_MAPA_IA.md](ACTUALIZACION_MAPA_IA.md) para la nueva pantalla inicial, restricciones de claves de Maps y `POST /api/assistant/chat`. En WebView comprueba la compatibilidad de la clave con el origen de la app y los permisos GPS.
+Consulta [ACTUALIZACION_OPENSTREETMAP.md](ACTUALIZACION_OPENSTREETMAP.md). El mapa se renderiza con Leaflet dentro de Capacitor, sin clave de Google. Necesita Internet para las teselas y permisos de ubicación para GPS. Se requieren pruebas en WebView Android/iOS y un backend HTTPS para iniciar sesión en móviles.

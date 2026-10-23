@@ -1,3 +1,5 @@
+> Archivo histórico para v0.7. El mapa Google Maps descrito aquí ya fue reemplazado. Consulta [ACTUALIZACION_OPENSTREETMAP.md](ACTUALIZACION_OPENSTREETMAP.md) para v0.8.
+
 # Wayvo — Actualización «Mapa primero + chat IA»
 
 ## Novedades de esta versión

@@ -6,7 +6,7 @@ import {
   Plus, Eye, Trash2, Edit2, Navigation,
   Bookmark, Volume2, Moon, Globe, ChevronDown, Bot, LocateFixed, Send, Sparkles, MessageCircle,
 } from "lucide-react";
-import {WayvoGoogleMap} from "./components/WayvoGoogleMap";
+import {WayvoLeafletMap} from "./components/WayvoLeafletMap";
 
 // ─── TYPES ────────────────────────────────────────────────────────────────────
 
@@ -105,15 +105,6 @@ const ROUTES: BusRoute[] = [
   },
 ];
 
-const BUS_DEFS = [
-  {id:"b1",routeId:"302",phase:0.00,speed:0.022},{id:"b2",routeId:"302",phase:0.38,speed:0.022},
-  {id:"b3",routeId:"302",phase:0.74,speed:0.022},{id:"b4",routeId:"306",phase:0.15,speed:0.036},
-  {id:"b5",routeId:"306",phase:0.68,speed:0.036},{id:"b6",routeId:"311",phase:0.10,speed:0.019},
-  {id:"b7",routeId:"311",phase:0.62,speed:0.019},{id:"b8",routeId:"315",phase:0.00,speed:0.025},
-  {id:"b9",routeId:"315",phase:0.53,speed:0.025},{id:"b10",routeId:"301",phase:0.20,speed:0.030},
-  {id:"b11",routeId:"301",phase:0.72,speed:0.030},
-];
-
 const VEHICLES: Vehicle[] = [
   {id:"MDE-302-01",empresa:"Trans-Bello Coop.",ruta:"302",estado:"En servicio"},
   {id:"MDE-302-02",empresa:"Trans-Bello Coop.",ruta:"302",estado:"En servicio"},
@@ -173,19 +164,6 @@ const SUGG = [
 const FAVORITE_ROUTE_IDS = ["302", "311"];
 
 // ─── HELPERS ──────────────────────────────────────────────────────────────────
-
-function lerp(pts: [number,number][], t: number): [number,number] {
-  const n = pts.length - 1;
-  if (n <= 0) return pts[0];
-  const sc = Math.max(0, Math.min(0.9999, t)) * n;
-  const i = Math.floor(sc);
-  const f = sc - i;
-  return [pts[i][0]+(pts[i+1][0]-pts[i][0])*f, pts[i][1]+(pts[i+1][1]-pts[i][1])*f];
-}
-
-function toPath(pts: [number,number][]): string {
-  return pts.map((p,i) => `${i===0?"M":"L"}${p[0]},${p[1]}`).join(" ");
-}
 
 // ─── UI ATOMS ─────────────────────────────────────────────────────────────────
 
@@ -475,105 +453,15 @@ function AuthScreen({onLogin}: {onLogin: (u: AppUser) => void}) {
   );
 }
 
-// ─── TRANSIT MAP SVG (overlay routes, no background) ─────────────────────────
-
-type BusPos = {id:string; routeId:string; x:number; y:number};
-
-function RoutesOverlay({activeRoute, busPositions, onBusClick, compact=false}: {
-  activeRoute: string|null;
-  busPositions: BusPos[];
-  onBusClick?: (id: string) => void;
-  compact?: boolean;
-}) {
-  const [hov, setHov] = useState<string|null>(null);
-  const hovBus = busPositions.find(b => b.id === hov);
-  const hovRoute = hovBus ? ROUTES.find(r => r.id === hovBus.routeId) : null;
-
-  return (
-    <svg viewBox="0 0 900 680" className="w-full h-full absolute inset-0 pointer-events-none" style={{zIndex:5}}>
-      {ROUTES.map(r => {
-        const isActive = activeRoute === r.id;
-        const dimmed = activeRoute !== null && !isActive;
-        return <path key={r.id} d={toPath(r.waypoints)} fill="none" stroke={r.color}
-          strokeWidth={isActive ? 6 : 3} strokeLinecap="round" strokeLinejoin="round"
-          opacity={dimmed ? 0.10 : isActive ? 1 : 0.7} style={{transition:"opacity 0.3s"}}/>;
-      })}
-      {activeRoute && ROUTES.find(r => r.id === activeRoute)?.waypoints.map((pt, i) => {
-        const rc = ROUTES.find(r => r.id === activeRoute)!;
-        return <circle key={i} cx={pt[0]} cy={pt[1]} r={4} fill="white" stroke={rc.color} strokeWidth={2} opacity={0.9}/>;
-      })}
-      {busPositions.map(bus => {
-        const route = ROUTES.find(r => r.id === bus.routeId);
-        if (!route) return null;
-        if (activeRoute !== null && activeRoute !== bus.routeId) return null;
-        const isHov = hov === bus.id;
-        return (
-          <g key={bus.id} transform={`translate(${bus.x},${bus.y})`}
-            style={{cursor: onBusClick ? "pointer" : "default", pointerEvents:"all"}}
-            onClick={() => onBusClick?.(bus.routeId)}
-            onMouseEnter={() => setHov(bus.id)} onMouseLeave={() => setHov(null)}>
-            {isHov && <circle r={14} fill={route.color} opacity={0.22}/>}
-            <circle r={isHov ? 10 : compact ? 5 : 8} fill={route.color} stroke="white" strokeWidth={2} style={{transition:"r 0.12s"}}/>
-            {!compact && <text textAnchor="middle" dy="4" fontSize="6" fontWeight="700" fill="white"
-              style={{fontFamily:"'Space Mono',monospace",pointerEvents:"none"}}>{bus.routeId}</text>}
-          </g>
-        );
-      })}
-      {!compact && hovBus && hovRoute && (() => {
-        const tx = hovBus.x > 780 ? hovBus.x - 116 : hovBus.x + 14;
-        const ty = hovBus.y < 50 ? hovBus.y + 14 : hovBus.y - 26;
-        return <g style={{pointerEvents:"none"}}>
-          <rect x={tx} y={ty} width={108} height={22} rx={4} fill="white" stroke={hovRoute.color} strokeWidth={1} opacity={0.97}/>
-          <text x={tx+54} y={ty+14} textAnchor="middle" fontSize="8" fontWeight="500" fill="#171717"
-            style={{fontFamily:"'DM Sans',sans-serif"}}>{hovRoute.name}</text>
-        </g>;
-      })()}
-    </svg>
-  );
-}
-
-// ─── MINI MAP (home screen, SVG-based) ───────────────────────────────────────
-
-function MiniTransitMap({busPositions}: {busPositions: BusPos[]}) {
-  const hLines = [110,170,230,290,350,410,470,530,590,645];
-  const vLines = [270,330,390,440,510,570,630,678];
-  return (
-    <svg viewBox="0 0 900 680" className="w-full h-full" style={{background:"#EAE6DC"}}>
-      <polygon points="0,680 0,130 42,108 78,85 112,68 142,78 165,58 182,75 196,55 208,74 214,98 218,130 220,680" fill="#D5D0C4"/>
-      <polygon points="900,680 900,130 858,108 822,85 788,68 758,78 735,58 718,75 704,55 692,74 686,98 682,130 680,680" fill="#D5D0C4"/>
-      {hLines.map(y => <line key={`h${y}`} x1="220" y1={y} x2="680" y2={y} stroke="#C5C0B2" strokeWidth="0.35"/>)}
-      {vLines.map(x => <line key={`v${x}`} x1={x} y1="80" x2={x} y2="652" stroke="#C5C0B2" strokeWidth="0.35"/>)}
-      <line x1="220" y1="330" x2="680" y2="330" stroke="#B8B3A5" strokeWidth="1.1"/>
-      <line x1="440" y1="80" x2="440" y2="652" stroke="#B8B3A5" strokeWidth="1.1"/>
-      {ROUTES.map(r => (
-        <path key={r.id} d={toPath(r.waypoints)} fill="none" stroke={r.color}
-          strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" opacity={0.62}/>
-      ))}
-      {busPositions.map(bus => {
-        const route = ROUTES.find(r => r.id === bus.routeId);
-        if (!route) return null;
-        return (
-          <circle key={bus.id} cx={bus.x} cy={bus.y} r={5} fill={route.color} stroke="white" strokeWidth={1.5}/>
-        );
-      })}
-      <g transform="translate(440,330)">
-        <circle r={9} fill="#2E7D32" opacity={0.18}/>
-        <circle r={5} fill="#2E7D32" stroke="white" strokeWidth={2}/>
-      </g>
-    </svg>
-  );
-}
-
 // ─── MAP SCREEN ───────────────────────────────────────────────────────────────
 
-function MapScreen({busPositions, activeRoute, onRouteChange}: {
-  busPositions: BusPos[];
+function MapScreen({activeRoute, onRouteChange}: {
   activeRoute: string|null;
   onRouteChange: (id: string|null) => void;
 }) {
   return <div className="wayvo-map-screen flex-1 flex flex-col relative min-h-0 bg-[#e8eddc]">
     <div className="flex-1 relative min-h-0">
-      <WayvoGoogleMap activeRoute={activeRoute} fallback={<MiniTransitMap busPositions={busPositions}/>}/>
+      <WayvoLeafletMap activeRoute={activeRoute} onRouteSelect={onRouteChange}/>
     </div>
     <div className="shrink-0 px-4 pt-3 pb-4 bg-[#fffdf1] border-t-2 border-[#1b4935]">
       <div className="flex items-center justify-between mb-2">
@@ -656,8 +544,8 @@ function AssistantScreen({onBack}: {onBack: () => void}) {
   </div>;
 }
 
-function HomeScreen({user, busPositions, unread, onNavigate}: {
-  user: AppUser; busPositions: BusPos[]; unread: number;
+function HomeScreen({user, unread, onNavigate}: {
+  user: AppUser; unread: number;
   onNavigate: (s: Screen|TabId) => void;
 }) {
   const quickActions = [
@@ -674,7 +562,7 @@ function HomeScreen({user, busPositions, unread, onNavigate}: {
       <button onClick={()=>onNavigate('notifications')} aria-label="Ver notificaciones" className="relative rounded-xl p-2.5 border-2 border-[#1b4935] bg-[#fffdf1] text-[#1b4935] shadow-[3px_3px_0_#1b4935]"><Bell size={19}/>{unread>0&&<span className="absolute -right-1 -top-1 bg-[#c97f42] rounded-full w-5 h-5 flex items-center justify-center text-white text-[10px] font-black">{unread}</span>}</button>
     </div>
     <div className="px-3"><div className="wayvo-home-map relative overflow-hidden rounded-[20px]">
-      <WayvoGoogleMap compact fallback={<MiniTransitMap busPositions={busPositions}/>}/>
+      <WayvoLeafletMap compact/>
     </div></div>
     <div className="px-4 pt-4 pb-2">
       <button onClick={()=>onNavigate('assistant')} className="wayvo-chat-home-cta w-full flex items-center gap-3 text-left rounded-2xl px-4 py-4">
@@ -1445,24 +1333,8 @@ export default function App() {
   const [selectedRoute, setSelectedRoute] = useState<BusRoute|null>(null);
   const [activeMapRoute, setActiveMapRoute] = useState<string|null>(null);
   const [notifications, setNotifications] = useState<AppNotif[]>(NOTIFS_DATA);
-  const [busPositions, setBusPositions] = useState<BusPos[]>([]);
 
   const unread = notifications.filter(n => !n.leida).length;
-
-  useEffect(() => {
-    const t0=performance.now();
-    const tick=()=>{
-      const elapsed=(performance.now()-t0)/1000;
-      setBusPositions(BUS_DEFS.map(def=>{
-        const route=ROUTES.find(r=>r.id===def.routeId)!;
-        const t=((def.phase+elapsed*def.speed)%1+1)%1;
-        const [x,y]=lerp(route.waypoints,t);
-        return {id:def.id,routeId:def.routeId,x,y};
-      }));
-    };
-    tick();const id=window.setInterval(tick,400);
-    return ()=>window.clearInterval(id);
-  }, []);
 
   const navigate = useCallback((s: Screen) => {
     setScreenStack(prev => [...prev, screen]);
@@ -1501,12 +1373,12 @@ export default function App() {
       case "admin":         return user.isAdmin ? <AdminScreen onBack={goBack}/> : null;
       case "favorites":     return <FavoritesScreen onBack={goBack} onViewRoute={goToRouteDetail} onViewMap={goToMap}/>;
       case "settings":      return <SettingsScreen onBack={goBack}/>;
-      case "map":           return <MapScreen busPositions={busPositions} activeRoute={activeMapRoute} onRouteChange={setActiveMapRoute}/>;
+      case "map":           return <MapScreen activeRoute={activeMapRoute} onRouteChange={setActiveMapRoute}/>;
       case "trips":         return <AssistantScreen onBack={goBack}/>;
       case "route-detail":  return <RoutesScreen selected={selectedRoute} onSelect={r=>setSelectedRoute(r)} onBack={goBack} onViewMap={goToMap}/>;
       case "routes":        return <RoutesScreen selected={null} onSelect={r=>{setSelectedRoute(r);navigate("route-detail");}} onBack={goBack} onViewMap={goToMap}/>;
       case "profile":       return <ProfileScreen user={user} onNavigate={navigate} onLogout={()=>{ api("/auth/logout",{method:"POST"}).catch(()=>{}); clearSession(); setUser(null); }}/>;
-      default:              return <HomeScreen user={user} busPositions={busPositions} unread={unread}
+      default:              return <HomeScreen user={user} unread={unread}
           onNavigate={dest=>{
             const tabs=["home","assistant","routes","map","trips","profile","admin"];
             if(tabs.includes(dest)) switchTab(dest as TabId); else navigate(dest as Screen);

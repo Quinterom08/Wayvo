@@ -108,3 +108,13 @@
 .wayvo-chat-send {background:#236344;border:1.5px solid #163b29;box-shadow:2px 2px 0 #143e2b;}
 .wayvo-map-wrap {background:#e4ebe0;}
 .wayvo-map-screen .wayvo-map-wrap {min-height:0;}
+
+/* Wayvo 0.8 — Leaflet + OpenStreetMap, UI retro urbana. */
+.wayvo-leaflet-canvas { z-index: 0; background: #e4ebe0; }
+.wayvo-leaflet-canvas .leaflet-container { font-family: 'DM Sans', system-ui, sans-serif; }
+.wayvo-leaflet-canvas .leaflet-control-zoom { border: 2px solid #1b4935 !important; border-radius: 9px; overflow: hidden; box-shadow: 2px 3px 0 #1b493555; }
+.wayvo-leaflet-canvas .leaflet-control-zoom a { background: #fffdf1; color: #1b4935; }
+.wayvo-leaflet-canvas .leaflet-control-attribution { background: #fffdf1ee !important; color: #1b4935; font-size: 10px; padding: 3px 5px; }
+.wayvo-leaflet-canvas .leaflet-control-attribution a { color: #215c42; text-decoration: underline; }
+.wayvo-leaflet-canvas .leaflet-popup-content-wrapper { background: #fffdf1; color: #1b4935; border: 1px solid #9ab29c; }
+.wayvo-leaflet-canvas .leaflet-popup-tip { background: #fffdf1; }
