@@ -41,6 +41,26 @@ class AuthenticationTests(unittest.TestCase):
         self.assertEqual(status,200)
         self.assertIn('WV-302',answer['answer'])
         self.assertTrue(answer['demo'])
+    def test_express_endpoints_require_login_and_return_structured_trip(self):
+        self.assertEqual(self.call('GET','/api/assistant/stops')[0],401)
+        self.assertEqual(self.call('POST','/api/assistant/quick-route',{'origin':'Bello','destination':'Envigado'})[0],401)
+        self.assertEqual(self.call('POST','/api/auth/register',{'name':'Express demo','email':'express@example.com','password':'demosegura123'})[0],201)
+        status,login=self.call('POST','/api/auth/login',{'email':'express@example.com','password':'demosegura123'})
+        self.assertEqual(status,200)
+        token=login['token']
+        status,stops=self.call('GET','/api/assistant/stops',token=token)
+        self.assertEqual(status,200)
+        self.assertIn('Bello',stops['stops'])
+        status,trip=self.call('POST','/api/assistant/quick-route',{'origin':'Laureles','destination':'Envigado'},token=token)
+        self.assertEqual(status,200)
+        self.assertTrue(trip['found'])
+        self.assertEqual(trip['transfers'],1)
+        self.assertEqual(trip['estimated_fare_cop'],6400)
+        status,bad=self.call('POST','/api/assistant/quick-route',{'origin':'Bogotá','destination':'Envigado'},token=token)
+        self.assertEqual(status,200)
+        self.assertFalse(bad['found'])
+        self.assertEqual(self.call('POST','/api/assistant/quick-route',{'origin':'Bello','destination':''},token=token)[0],400)
+
     def test_social_status_without_secrets(self):
         for provider in ('google','microsoft'):
             status,body=self.call('GET',f'/api/auth/oauth/{provider}/status')

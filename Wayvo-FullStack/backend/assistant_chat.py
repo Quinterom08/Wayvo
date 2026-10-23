@@ -72,14 +72,64 @@ def plan_route(origin,destination):
         if at==end:
             segments=[]
             for leg in legs:
-                if segments and segments[-1]['id']==leg[0]:segments[-1]['end']=leg[2]
-                else:segments.append({'id':leg[0],'start':leg[1],'end':leg[2]})
+                if segments and segments[-1]['id']==leg[0]:segments[-1]['end']=leg[2];segments[-1]['stops'].append(leg[2])
+                else:segments.append({'id':leg[0],'start':leg[1],'end':leg[2],'stops':[leg[1],leg[2]]})
             return segments
         for next_stop,route_id in graph.get(at,[]):
             new_transfers=transfers+(1 if last and last!=route_id else 0)
             if new_transfers>2 or hops>20: continue
             heapq.heappush(heap,(new_transfers,hops+1,next_stop,route_id,legs+[(route_id,at,next_stop)]))
     return []
+
+
+def demo_stops():
+    """List only stops that are actually present in the demonstration network."""
+    return sorted({stop for route in DEMO_ROUTES for stop in route['stops']}, key=normalize)
+
+
+def quick_route(origin, destination):
+    """Structured, deterministic, *fictional* route for the express UI."""
+    names = {normalize(stop): stop for stop in demo_stops()}
+    start, finish = names.get(normalize(origin)), names.get(normalize(destination))
+    if not start or not finish:
+        return {'found': False, 'message': 'Selecciona dos paraderos del catálogo de demostración.'}
+    if start == finish:
+        return {'found': False, 'message': 'Elige un destino diferente al origen.'}
+    legs = plan_route(start, finish)
+    if not legs:
+        return {'found': False, 'message': 'No existe una conexión entre estos paraderos en las rutas simuladas de Wayvo.'}
+
+    result = []
+    for leg in legs:
+        route = next(item for item in DEMO_ROUTES if item['id'] == leg['id'])
+        # plan_route provides the ordered stops traversed, not just the end points.
+        visited = leg['stops']
+        count = max(1, len(visited) - 1)
+        total_edges = max(1, len(route['stops']) - 1)
+        estimated = max(1, round(route['minutes'] * count / total_edges))
+        result.append({
+            'bus': 'WV-' + route['id'],
+            'name': route['name'],
+            'board_at': leg['start'],
+            'get_off_at': leg['end'],
+            'stops': visited,
+            'stop_count': count,
+            'estimated_minutes': estimated,
+            'fare_cop': route['fare'],
+        })
+    transfers = len(result) - 1
+    return {
+        'found': True,
+        'demo': True,
+        'origin': start,
+        'destination': finish,
+        'direct': transfers == 0,
+        'transfers': transfers,
+        'segments': result,
+        'estimated_minutes': sum(part['estimated_minutes'] for part in result) + 7 * transfers,
+        'estimated_fare_cop': sum(part['fare_cop'] for part in result),
+        'disclaimer': 'Datos ficticios para el proyecto de grado. No son indicaciones de transporte real.',
+    }
 
 
 def format_plan(segments):

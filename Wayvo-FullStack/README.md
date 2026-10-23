@@ -1,3 +1,7 @@
+> **Nuevo en v1.0 (iPhone + Ruta Express):** eliminada la barra inferior, accesos directos desde Inicio, mapa pulsable, ajuste a altura visible de Safari y Ruta Express siempre disponible al entrar a IA. Consulta [ACTUALIZACION_NAV_IOS_V1.md](ACTUALIZACION_NAV_IOS_V1.md).
+
+> **Nuevo en v0.9:** Ruta Express dentro de Wayvo IA: escoge origen y destino para recibir el bus, paraderos, transbordos, tiempo y tarifa de demostración sin escribir en el chat. Ver [ACTUALIZACION_RUTA_EXPRESS.md](ACTUALIZACION_RUTA_EXPRESS.md).
+
 # ACTUALIZACIÓN: OPENSTREETMAP + LEAFLET + WAYVO IA
 
 Consulta **[ACTUALIZACION_OPENSTREETMAP.md](ACTUALIZACION_OPENSTREETMAP.md)** para el mapa interactivo gratuito sin clave de Google, el GPS y la selección de rutas simuladas. El chat Wayvo IA continúa disponible.

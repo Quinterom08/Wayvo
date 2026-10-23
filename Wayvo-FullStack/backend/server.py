@@ -12,7 +12,7 @@ from pathlib import Path
 from urllib.parse import unquote, urlsplit, urlencode, parse_qs
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError
-from assistant_chat import chat_reply
+from assistant_chat import chat_reply, demo_stops, quick_route
 
 BASE = Path(__file__).resolve().parent
 
@@ -126,7 +126,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def cors_headers(self):
         origin = self.headers.get('Origin', '')
-        if origin in ALLOWED_ORIGINS:
+        if origin in ALLOWED_ORIGINS or origin.endswith('.trycloudflare.com') or 'localhost' in origin or '127.0.0.1' in origin:
             self.send_header('Access-Control-Allow-Origin', origin)
             self.send_header('Vary', 'Origin')
             self.send_header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
@@ -223,6 +223,17 @@ class Handler(BaseHTTPRequestHandler):
                     db.execute('DELETE FROM oauth_tickets WHERE ticket_hash=?',(digest,))
                     row=db.execute('SELECT * FROM users WHERE id=?',(pending['user_id'],)).fetchone()
                     return self.send(200,{'token':issue_token(db,row['id']),'user':public_user(row)})
+                if path == '/api/assistant/stops' and method == 'GET':
+                    if not self.current_user(db): return self.send(401, {'error':'Debes iniciar sesión'})
+                    return self.send(200, {'stops':demo_stops(), 'demo':True})
+                if path == '/api/assistant/quick-route' and method == 'POST':
+                    if not self.current_user(db): return self.send(401, {'error':'Debes iniciar sesión'})
+                    origin, destination = data.get('origin'), data.get('destination')
+                    if not isinstance(origin,str) or not isinstance(destination,str) or len(origin)>100 or len(destination)>100:
+                        return self.send(400, {'error':'Elige un origen y un destino válidos.'})
+                    if not origin.strip() or not destination.strip():
+                        return self.send(400, {'error':'Elige un origen y un destino.'})
+                    return self.send(200, quick_route(origin, destination))
                 if path == '/api/assistant/chat' and method == 'POST':
                     if not self.current_user(db): return self.send(401,{'error':'Debes iniciar sesión'})
                     raw=data.get('messages')

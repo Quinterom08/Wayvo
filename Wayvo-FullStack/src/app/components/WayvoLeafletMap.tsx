@@ -27,9 +27,10 @@ interface Props {
   activeRoute?: string | null;
   compact?: boolean;
   onRouteSelect?: (id: string | null) => void;
+  onOpenMap?: () => void;
 }
 
-export function WayvoLeafletMap({ activeRoute = null, compact = false, onRouteSelect }: Props) {
+export function WayvoLeafletMap({ activeRoute = null, compact = false, onRouteSelect, onOpenMap }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
   const linesRef = useRef<Map<string, L.Polyline>>(new Map());
@@ -37,6 +38,8 @@ export function WayvoLeafletMap({ activeRoute = null, compact = false, onRouteSe
   // Callback ref avoids rebuilding the map whenever the parent rerenders.
   const onSelectRef = useRef(onRouteSelect);
   onSelectRef.current = onRouteSelect;
+  const onOpenRef = useRef(onOpenMap);
+  onOpenRef.current = onOpenMap;
 
   const [locating, setLocating] = useState(false);
   const [error, setError] = useState('');
@@ -51,10 +54,14 @@ export function WayvoLeafletMap({ activeRoute = null, compact = false, onRouteSe
       zoomControl: false,
       scrollWheelZoom: !compact,
       // Small screens: avoid accidental map movement when scrolling home.
-      dragging: true,
+      dragging: !compact,
+      touchZoom: !compact,
+      doubleClickZoom: !compact,
+      boxZoom: !compact,
     });
     mapRef.current = map;
-    L.control.zoom({ position: 'bottomright' }).addTo(map);
+    if (!compact) L.control.zoom({ position: 'bottomright' }).addTo(map);
+    if (compact) map.on('click', () => onOpenRef.current?.());
 
     // Attribution must stay visible: required by the OSM tile policy.
     const tiles = L.tileLayer(TILE_URL, {
@@ -77,6 +84,7 @@ export function WayvoLeafletMap({ activeRoute = null, compact = false, onRouteSe
         weight: 4,
         opacity: .85,
         dashArray: '9 7',
+        interactive: !compact,
         lineCap: 'round',
         lineJoin: 'round',
       }).addTo(map);
@@ -175,11 +183,12 @@ export function WayvoLeafletMap({ activeRoute = null, compact = false, onRouteSe
       <div className="absolute top-3 left-3 max-w-[70%] z-[500] rounded-xl bg-[#fffdf1]/95 border border-[#74917b] px-3 py-2 text-[10px] font-extrabold text-[#1b4935] shadow-md pointer-events-none">
         OPENSTREETMAP · DEMOSTRACIÓN
       </div>
-      <button type="button" onClick={locate} disabled={locating} aria-label="Centrar mapa en mi ubicación GPS" title="Mi ubicación" className="absolute z-[500] top-3 right-3 bg-[#fffdf1] border-2 border-[#1b4935] rounded-xl p-2.5 text-[#1b4935] shadow-md disabled:opacity-60">
+      {!compact && <button type="button" onClick={locate} disabled={locating} aria-label="Centrar mapa en mi ubicación GPS" title="Mi ubicación" className="absolute z-[500] top-3 right-3 bg-[#fffdf1] border-2 border-[#1b4935] rounded-xl p-2.5 text-[#1b4935] shadow-md disabled:opacity-60">
         <LocateFixed size={19} className={locating ? 'animate-pulse' : ''} />
-      </button>
-      {gpsPosition && <div className="absolute z-[500] top-14 right-2 bg-[#fffdf1] rounded-md px-2 py-1 text-[10px] font-bold text-[#1b4935] border border-[#74917b]">GPS activo</div>}
+      </button>}
+      {!compact && gpsPosition && <div className="absolute z-[500] top-14 right-2 bg-[#fffdf1] rounded-md px-2 py-1 text-[10px] font-bold text-[#1b4935] border border-[#74917b]">GPS activo</div>}
       {error && <div role="alert" className="absolute z-[500] left-2 right-2 bottom-16 rounded-xl bg-[#fff8db]/95 border border-[#b57c45] p-2 flex items-start gap-2 text-xs text-[#663d20] shadow-md"><AlertCircle size={16} className="shrink-0" />{error}</div>}
+      {compact && <div className="wayvo-preview-tap absolute z-[500] right-3 top-14 pointer-events-none">Toca el mapa para ampliar ↗</div>}
       <div className="absolute z-[500] left-2 bottom-7 max-w-[65%] bg-[#fffdf1]/95 border border-[#b4c3ae] text-[#426046] px-2.5 py-1 rounded-lg text-[10px] font-semibold pointer-events-none">
         <MapPin size={11} className="inline mr-1" />Rutas ilustrativas, no oficiales
       </div>

@@ -118,3 +118,69 @@
 .wayvo-leaflet-canvas .leaflet-control-attribution a { color: #215c42; text-decoration: underline; }
 .wayvo-leaflet-canvas .leaflet-popup-content-wrapper { background: #fffdf1; color: #1b4935; border: 1px solid #9ab29c; }
 .wayvo-leaflet-canvas .leaflet-popup-tip { background: #fffdf1; }
+
+/* Wayvo 0.9 — Express bus finder in Wayvo IA (retro urban design). */
+.wayvo-express { background:#edf1e4; border-bottom:2px dashed #aac29e; }
+.wayvo-express-card {background:#fffdf1;border:2px solid #1b4935;border-radius:15px;box-shadow:3px 4px 0 #b6c9a9;overflow:hidden;}
+.wayvo-express-heading {background:#e6d681;color:#1b4935;border-bottom:1px solid #b7a95e;}
+.wayvo-express-mark {display:grid;place-items:center;width:33px;height:33px;background:#1b4935;color:#fff6c6;border-radius:9px;flex-shrink:0;}
+.wayvo-express-label {display:flex;align-items:center;gap:3px;font-size:9px;font-weight:900;letter-spacing:.7px;color:#35634a;margin-bottom:4px;white-space:nowrap;}
+.wayvo-express-select {height:40px;min-width:0;max-width:100%;font-size:12px;font-weight:750;line-height:1.2;border:1.5px solid #a6bda1;border-radius:9px;padding:4px 5px;background:#f6f8ef;color:#1b4935;}
+.wayvo-express-select:focus-visible,.wayvo-express-swap:focus-visible,.wayvo-express-search:focus-visible {outline:3px solid #d9b964;outline-offset:2px;}
+.wayvo-express-swap {color:#234f38;background:#e6efde;border:1.5px solid #9fb39e;}
+.wayvo-express-swap:disabled {opacity:.45;}
+.wayvo-express-search {color:#fffdf1;background:#245b3f;border:1px solid #153c2b;box-shadow:2px 2px 0 #173d2e;}
+.wayvo-express-search:disabled {opacity:.52;box-shadow:none;cursor:not-allowed;}
+.wayvo-express-result {padding:10px;border-radius:11px;background:#f0f2e8;border:1.5px dashed #9cad8c;overflow:visible;}
+.wayvo-express-tag {background:#dce9ca;color:#1b4935;border:1px solid #a4baa0;padding:3px 7px;border-radius:7px;font-size:10px;font-weight:900;white-space:nowrap;}
+.wayvo-express-metric {display:flex;align-items:center;gap:4px;padding:7px;background:#fffdf1;border:1px solid #b6c5ae;border-radius:8px;font-weight:800;color:#264b35;}
+.wayvo-express-leg {border:1px solid #bbcdb7;background:#fffdf1;border-radius:9px;padding:8px;}
+.wayvo-express-bus {display:inline-flex;align-items:center;gap:4px;padding:3px 7px;border-radius:7px;background:#245b3f;color:#fffdf1;font-size:11px;font-weight:900;white-space:nowrap;}
+.wayvo-express-ask {color:#1d5b40;text-decoration:underline;text-underline-offset:3px;}
+
+/* Wayvo 1.0 — Navegación sin barras persistentes; viewport iOS seguro. */
+.wayvo-stage {
+  height: 100vh; /* Safari antiguo */
+  height: 100dvh; /* área realmente visible, Safari/iOS actual */
+  height: min(100dvh, var(--wayvo-visual-height, 100dvh));
+  min-height: 0;
+}
+.wayvo-app-shell { height:100%; min-height:0; }
+.wayvo-screen-content { flex:1; min-height:0; }
+.wayvo-home,.wayvo-chat-scroll,.wayvo-profile-return { -webkit-overflow-scrolling:touch; }
+.wayvo-home { overscroll-behavior-y:contain; padding-bottom: max(18px, env(safe-area-inset-bottom)); }
+.wayvo-inline-brand { flex:none; display:flex; align-items:center; gap:10px; padding:calc(10px + env(safe-area-inset-top)) 16px 10px; color:#fffdf1; background:#1b4935; border-bottom:4px solid #e2ce79; }
+.wayvo-inline-brand strong { display:block; font-family:Georgia,serif; font-size:21px; letter-spacing:2.4px; line-height:1.15; }
+.wayvo-inline-brand small { display:block; font-size:8px; letter-spacing:1.1px; font-weight:800; color:#d6e7ba; }
+.wayvo-map-open { background:#e6d681; color:#1b4935; border:2px solid #1b4935; box-shadow:3px 3px 0 #93ad86; font-size:14px; font-weight:900; }
+.wayvo-map-open:active { transform:translate(2px,2px); box-shadow:1px 1px 0 #93ad86; }
+.wayvo-preview-tap { padding:7px 11px; color:#1b4935; background:#fffdf1ed; border:1px solid #b2c7ac; border-radius:9px; font-size:11px; font-weight:900; box-shadow:1px 2px 0 #567b5c55; }
+.wayvo-page-header { flex:none; display:flex; align-items:center; gap:12px; padding:calc(10px + env(safe-area-inset-top)) 15px 10px; background:#1b4935; color:#fffdf1; border-bottom:3px solid #e6d681; }
+.wayvo-page-header strong,.wayvo-page-header small { display:block; }
+.wayvo-page-header strong { font-size:15px; font-weight:900; }
+.wayvo-page-header small { font-size:10px; color:#d7e8ce; }
+.wayvo-back-button { flex:none; display:grid; place-items:center; width:39px; height:39px; border-radius:10px; background:#e6d681; color:#1b4935; }
+.wayvo-back-link { display:inline-flex; align-items:center; gap:5px; font-size:13px; color:#1b4935; font-weight:900; border:1px solid #8eaa8d; border-radius:10px; background:#fffdf1; padding:10px 14px; }
+.wayvo-version-pill {font-size:9px; display:inline-block; margin-left:6px; padding:2px 6px; border-radius:8px; background:#1b4935; color:#fffdf1; vertical-align:middle;}
+.wayvo-chat-screen { min-height:0; }
+.wayvo-chat-screen > div:first-child { padding-top:calc(10px + env(safe-area-inset-top)); }
+.wayvo-chat-scroll { overscroll-behavior-y:contain; }
+.wayvo-chat-scroll .wayvo-express { margin:0 0 16px; padding:0 1px 5px; background:transparent; border-bottom:0; }
+.wayvo-chat-screen > form:last-child { padding-bottom:max(10px, env(safe-area-inset-bottom)); }
+@media(max-width:440px) {
+  .wayvo-express-fields { grid-template-columns: minmax(0,1fr) 40px; }
+  .wayvo-express-fields > label:first-child { grid-column:1; }
+  .wayvo-express-fields > button { grid-column:2; grid-row:1 / span 2; align-self:center; }
+  .wayvo-express-fields > label:last-child { grid-column:1; grid-row:2; }
+}
+@media(max-width:599px) {
+  /* iOS Safari amplía formularios cuyo texto sea inferior a 16px. */
+  .wayvo-express-select,.wayvo-chat-input { font-size:16px; }
+}
+@media(min-width:600px) {
+  .wayvo-app-shell {height:min(100dvh,920px);}
+}
+
+/* Otras pantallas abren a pantalla completa tras retirar la barra superior. */
+.wayvo-screen-content > div:not(.wayvo-home):not(.wayvo-chat-screen):not(.wayvo-map-screen) { padding-top: env(safe-area-inset-top); }
+.wayvo-app-shell .overflow-y-auto { -webkit-overflow-scrolling:touch; }

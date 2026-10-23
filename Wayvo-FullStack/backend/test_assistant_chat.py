@@ -10,7 +10,7 @@ from pathlib import Path
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
-from assistant_chat import plan_route, local_answer, chat_reply
+from assistant_chat import plan_route, local_answer, chat_reply, quick_route, demo_stops
 
 class RoutePlannerTests(unittest.TestCase):
     def test_bello_envigado_direct(self):
@@ -19,6 +19,33 @@ class RoutePlannerTests(unittest.TestCase):
         self.assertEqual([r['id'] for r in plan_route('Belén','Robledo')],['311'])
     def test_laureles_envigado_transfer(self):
         self.assertEqual([r['id'] for r in plan_route('Laureles','Envigado')],['306','302'])
+    def test_express_direct_trip_details(self):
+        trip=quick_route('Bello','Envigado')
+        self.assertTrue(trip['found'])
+        self.assertTrue(trip['direct'])
+        self.assertEqual(trip['segments'][0]['bus'],'WV-302')
+        self.assertEqual(trip['segments'][0]['board_at'],'Bello')
+        self.assertEqual(trip['segments'][0]['get_off_at'],'Envigado')
+        self.assertEqual(trip['segments'][0]['stop_count'],7)
+        self.assertEqual(trip['estimated_fare_cop'],3200)
+
+    def test_express_transfer_and_reverse(self):
+        trip=quick_route('Laureles','Envigado')
+        self.assertTrue(trip['found'])
+        self.assertEqual([s['bus'] for s in trip['segments']],['WV-306','WV-302'])
+        self.assertEqual(trip['segments'][0]['get_off_at'],trip['segments'][1]['board_at'])
+        self.assertEqual(trip['transfers'],1)
+        self.assertEqual(trip['estimated_fare_cop'],6400)
+        reverse=quick_route('Envigado','Bello')
+        self.assertEqual(reverse['segments'][0]['stops'][0],'Envigado')
+        self.assertEqual(reverse['segments'][0]['stops'][-1],'Bello')
+
+    def test_express_no_invented_stops(self):
+        self.assertFalse(quick_route('Bogotá','Envigado')['found'])
+        self.assertFalse(quick_route('Bello','Bello')['found'])
+        self.assertIn('Laureles',demo_stops())
+        self.assertEqual(len(demo_stops()),len(set(demo_stops())))
+
     def test_unknown_does_not_invent(self):
         self.assertEqual(plan_route('Bogotá','Cartagena'),[])
     def test_gps_without_location_does_not_guess(self):
