@@ -6,6 +6,9 @@ import json
 import os
 import secrets
 import sqlite3
+import time
+import threading
+import math
 from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -13,6 +16,8 @@ from urllib.parse import unquote, urlsplit, urlencode, parse_qs
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError
 from assistant_chat import chat_reply, demo_stops, quick_route
+from mail_security import validate_password, send_code, ready as mail_ready
+from gps_helpers import valid_track
 
 BASE = Path(__file__).resolve().parent
 
@@ -96,12 +101,39 @@ def init():
         CREATE TABLE IF NOT EXISTS social_accounts(provider TEXT NOT NULL,subject TEXT NOT NULL,user_id INTEGER NOT NULL REFERENCES users(id),PRIMARY KEY(provider,subject));
         CREATE TABLE IF NOT EXISTS oauth_pending(state_hash TEXT PRIMARY KEY, provider TEXT NOT NULL, mode TEXT NOT NULL, expires_at TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS oauth_tickets(ticket_hash TEXT PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id),expires_at TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS email_codes (
+          email TEXT NOT NULL, purpose TEXT NOT NULL,
+          code_hash TEXT NOT NULL, expires_at TEXT NOT NULL,
+          issued_at TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0,
+          PRIMARY KEY(email, purpose)
+        );
+        CREATE TABLE IF NOT EXISTS gps_tracks (
+          id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          points TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS bus_devices (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          label TEXT NOT NULL,
+          route_id TEXT NOT NULL,
+          secret_hash TEXT UNIQUE NOT NULL,
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS bus_positions (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          device_id INTEGER NOT NULL REFERENCES bus_devices(id) ON DELETE CASCADE,
+          lat REAL NOT NULL, lng REAL NOT NULL, accuracy REAL,
+          recorded_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS bus_positions_recent ON bus_positions(device_id,id DESC);
         ''')
+        # Database migration for pre-existing installations.
+        if 'verified_at' not in [c['name'] for c in db.execute('PRAGMA table_info(users)')]:
+            db.execute('ALTER TABLE users ADD COLUMN verified_at TEXT')
         # Bootstrap admin credentials are created ONLY when explicitly supplied.
         email = os.environ.get('WAYVO_ADMIN_EMAIL', '').strip().lower()
         password = os.environ.get('WAYVO_ADMIN_PASSWORD', '')
-        if email and len(password) >= 12 and not db.execute('SELECT id FROM users WHERE email=?', (email,)).fetchone():
-            db.execute('INSERT INTO users(name,email,password_hash,role) VALUES(?,?,?,?)', ('Administrador', email, hashed(password), 'worker'))
+        if email and not validate_password(password) and not db.execute('SELECT id FROM users WHERE email=?', (email,)).fetchone():
+            db.execute('INSERT INTO users(name,email,password_hash,role,verified_at) VALUES(?,?,?,?,?)', ('Administrador', email, hashed(password), 'worker', datetime.now(timezone.utc).isoformat()))
 
 def issue_token(db, user_id):
     token = secrets.token_urlsafe(32)
@@ -111,6 +143,46 @@ def issue_token(db, user_id):
 
 def public_user(row):
     return {'name': row['name'], 'email': row['email'], 'isAdmin': row['role'] == 'worker'}
+
+# Brute-force protection per IP, including nonexistent usernames.
+_RATE_LOCK = threading.Lock()
+_RATE_ATTEMPTS = {}
+def check_rate(ip, action, max_count=16, period=600):
+    now = time.monotonic()
+    key = (ip, action)
+    with _RATE_LOCK:
+        recent = [t for t in _RATE_ATTEMPTS.get(key, []) if now-t < period]
+        if len(recent) >= max_count:
+            _RATE_ATTEMPTS[key] = recent
+            return False
+        recent.append(now)
+        _RATE_ATTEMPTS[key] = recent
+        return True
+
+
+def otp_create(db, email, purpose, bypass_cooldown=False):
+    now = datetime.now(timezone.utc)
+    prev = db.execute('SELECT issued_at FROM email_codes WHERE email=? AND purpose=?', (email, purpose)).fetchone()
+    if prev and not bypass_cooldown and (now - datetime.fromisoformat(prev['issued_at'])).total_seconds() < 60:
+        raise ValueError('Espera 60 segundos antes de solicitar otro código.')
+    code = f'{secrets.randbelow(1000000):06d}'
+    db.execute('INSERT INTO email_codes(email,purpose,code_hash,expires_at,issued_at,attempts) VALUES(?,?,?,?,?,0) '
+               'ON CONFLICT(email,purpose) DO UPDATE SET code_hash=excluded.code_hash, expires_at=excluded.expires_at, issued_at=excluded.issued_at, attempts=0',
+               (email, purpose, hashed(code), (now+timedelta(minutes=10)).isoformat(), now.isoformat()))
+    # Delivery is synchronous so SMTP failure rolls back the transaction.
+    send_code(email, purpose, code)
+
+
+def otp_check(db, email, purpose, code):
+    if not (isinstance(code, str) and len(code)==6 and code.isascii() and code.isdigit()):
+        return False
+    row = db.execute('SELECT * FROM email_codes WHERE email=? AND purpose=?', (email,purpose)).fetchone()
+    if not row or row['attempts'] >= 5 or row['expires_at'] < datetime.now(timezone.utc).isoformat():
+        return False
+    db.execute('UPDATE email_codes SET attempts=attempts+1 WHERE email=? AND purpose=?', (email,purpose))
+    if not password_ok(code, row['code_hash']): return False
+    db.execute('DELETE FROM email_codes WHERE email=? AND purpose=?', (email,purpose))
+    return True
 
 class Handler(BaseHTTPRequestHandler):
     def send(self, status, value):
@@ -126,7 +198,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def cors_headers(self):
         origin = self.headers.get('Origin', '')
-        if origin in ALLOWED_ORIGINS or origin.endswith('.trycloudflare.com') or 'localhost' in origin or '127.0.0.1' in origin:
+        if origin in ALLOWED_ORIGINS:
             self.send_header('Access-Control-Allow-Origin', origin)
             self.send_header('Vary', 'Origin')
             self.send_header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
@@ -140,7 +212,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def payload(self):
         length = int(self.headers.get('Content-Length', '0'))
-        if length > 32768:
+        limit = 160000 if urlsplit(self.path).path == '/api/gps/tracks' else 32768
+        if length < 0 or length > limit:
             raise ValueError('Solicitud demasiado grande')
         data = json.loads(self.rfile.read(length) or b'{}')
         if not isinstance(data, dict):
@@ -153,7 +226,7 @@ class Handler(BaseHTTPRequestHandler):
             return None
         digest = hashlib.sha256(auth[7:].encode()).hexdigest()
         row = db.execute('''SELECT u.* FROM users u JOIN sessions s ON s.user_id=u.id
-            WHERE s.token_hash=? AND s.expires_at>?''', (digest, datetime.now(timezone.utc).isoformat())).fetchone()
+            WHERE s.token_hash=? AND s.expires_at>? AND u.verified_at IS NOT NULL''', (digest, datetime.now(timezone.utc).isoformat())).fetchone()
         return row
 
     def handle_api(self, method):
@@ -222,7 +295,40 @@ class Handler(BaseHTTPRequestHandler):
                     if not pending: return self.send(401,{'error':'Código de acceso inválido o vencido'})
                     db.execute('DELETE FROM oauth_tickets WHERE ticket_hash=?',(digest,))
                     row=db.execute('SELECT * FROM users WHERE id=?',(pending['user_id'],)).fetchone()
-                    return self.send(200,{'token':issue_token(db,row['id']),'user':public_user(row)})
+                    if not mail_ready(): return self.send(503,{'error':'OAuth verificado, pero falta configurar el correo para el segundo factor.'})
+                    try: otp_create(db,row['email'],'login')
+                    except ValueError as e: return self.send(429,{'error':str(e)})
+                    except Exception:
+                        db.rollback()
+                        return self.send(503,{'error':'No se pudo enviar el segundo factor al correo.'})
+                    db.commit()
+                    return self.send(200,{'requires_verification':True,'purpose':'login','email':row['email']})
+                # GPS telemetry: hardware or a dedicated simulator POSTs positions
+                # using its own per-bus secret. Never accept a passenger session here.
+                if path == '/api/gps/device/position' and method == 'POST':
+                    key = self.headers.get('X-Wayvo-Device-Key', '')
+                    if len(key) < 30 or len(key) > 256:
+                        return self.send(401, {'error': 'Credencial de dispositivo requerida.'})
+                    key_hash = hashlib.sha256(key.encode()).hexdigest()
+                    device = db.execute('SELECT id FROM bus_devices WHERE secret_hash=?', (key_hash,)).fetchone()
+                    if not device:
+                        return self.send(401, {'error': 'Dispositivo no autorizado.'})
+                    lat, lng, acc = data.get('lat'), data.get('lng'), data.get('accuracy')
+                    if any(isinstance(v, bool) or not isinstance(v, (int,float)) or not math.isfinite(v) for v in (lat,lng)) or not (-90 <= lat <= 90 and -180 <= lng <= 180):
+                        return self.send(400, {'error': 'Coordenadas GPS inválidas.'})
+                    if acc is not None and (isinstance(acc,bool) or not isinstance(acc,(int,float)) or not math.isfinite(acc) or not 0 <= acc <= 1000):
+                        return self.send(400, {'error': 'Precisión inválida.'})
+                    # Database timestamps prevent replayed/fabricated device times.
+                    now=datetime.now(timezone.utc)
+                    last=db.execute('SELECT recorded_at FROM bus_positions WHERE device_id=? ORDER BY id DESC LIMIT 1',(device['id'],)).fetchone()
+                    if last and (now-datetime.fromisoformat(last['recorded_at'])).total_seconds()<2:
+                        return self.send(429, {'error': 'Máximo una posición cada 2 segundos.'})
+                    db.execute('INSERT INTO bus_positions(device_id,lat,lng,accuracy,recorded_at) VALUES (?,?,?,?,?)',
+                               (device['id'],round(lat,6),round(lng,6),round(acc,1) if acc is not None else None,now.isoformat()))
+                    # Retain only 500 latest samples per device for the academic prototype.
+                    db.execute('DELETE FROM bus_positions WHERE device_id=? AND id NOT IN (SELECT id FROM bus_positions WHERE device_id=? ORDER BY id DESC LIMIT 500)',(device['id'],device['id']))
+                    db.commit()
+                    return self.send(202, {'received':True})
                 if path == '/api/assistant/stops' and method == 'GET':
                     if not self.current_user(db): return self.send(401, {'error':'Debes iniciar sesión'})
                     return self.send(200, {'stops':demo_stops(), 'demo':True})
@@ -281,26 +387,156 @@ class Handler(BaseHTTPRequestHandler):
                     return self.send(200,{'answer':response,'routes':direct[:5],'source':'rutas_administradas'})
                 if path == '/api/health' and method == 'GET':
                     return self.send(200, {'status': 'ok', 'database': 'sqlite'})
+                # Email/password flows require 6-digit email confirmation before a session exists.
+                if path in ('/api/auth/register','/api/auth/login','/api/auth/forgot','/api/auth/resend','/api/auth/verify','/api/auth/reset') and method == 'POST':
+                    if not check_rate(self.client_address[0], path, 20 if path.endswith('/verify') else 12):
+                        return self.send(429, {'error':'Demasiados intentos. Intenta nuevamente en unos minutos.'})
                 if path == '/api/auth/register' and method == 'POST':
-                    name, email, password = str(data.get('name','')).strip(), str(data.get('email','')).strip().lower(), str(data.get('password',''))
-                    if not name or len(name) > 120 or '@' not in email or len(email) > 255 or len(password) < 8:
-                        return self.send(400, {'error':'Datos inválidos. La contraseña debe tener 8 caracteres como mínimo.'})
-                    if db.execute('SELECT id FROM users WHERE email=?', (email,)).fetchone():
-                        return self.send(409, {'error':'Ya existe una cuenta con ese correo.'})
-                    db.execute('INSERT INTO users(name,email,password_hash,role) VALUES(?,?,?,?)', (name,email,hashed(password),'client'))
-                    return self.send(201, {'message':'Cuenta creada correctamente'})
+                    name = str(data.get('name','')).strip()
+                    email = str(data.get('email','')).strip().lower()
+                    password = data.get('password', '')
+                    problem = validate_password(password)
+                    if not name or len(name)>120 or '@' not in email or len(email)>255 or problem:
+                        return self.send(400, {'error':problem or 'Completa el nombre y un correo válido.'})
+                    if db.execute('SELECT 1 FROM users WHERE email=?', (email,)).fetchone():
+                        return self.send(409, {'error':'Este correo ya está registrado. Si aún no lo verificaste, inicia el proceso de ingreso.'})
+                    if not mail_ready():
+                        return self.send(503, {'error':'El envío de correos no está configurado. Consulta backend/.env.'})
+                    try:
+                        db.execute('INSERT INTO users(name,email,password_hash,role) VALUES(?,?,?,?)', (name,email,hashed(password),'client'))
+                        otp_create(db,email,'register')
+                    except Exception:
+                        db.rollback()
+                        return self.send(503, {'error':'No se pudo enviar el código por correo. Revisa la configuración SMTP.'})
+                    db.commit()
+                    return self.send(201, {'requires_verification':True,'purpose':'register','message':'Te enviamos un código de 6 dígitos al correo.'})
                 if path == '/api/auth/login' and method == 'POST':
-                    email, password = str(data.get('email','')).strip().lower(), str(data.get('password',''))
+                    email = str(data.get('email','')).strip().lower()
+                    password = data.get('password','')
                     row = db.execute('SELECT * FROM users WHERE email=?', (email,)).fetchone()
-                    if not row or not password_ok(password, row['password_hash']):
+                    if not row or not isinstance(password,str) or not password_ok(password, row['password_hash']):
                         return self.send(401, {'error':'Correo o contraseña incorrectos.'})
-                    return self.send(200, {'token':issue_token(db,row['id']), 'user':public_user(row)})
+                    if not mail_ready():
+                        return self.send(503, {'error':'El envío de correos no está configurado. Consulta backend/.env.'})
+                    purpose = 'register' if not row['verified_at'] else 'login'
+                    try:
+                        otp_create(db,email,purpose)
+                    except ValueError as e:
+                        return self.send(429,{'error':str(e)})
+                    except Exception:
+                        db.rollback()
+                        return self.send(503,{'error':'No se pudo enviar el código de acceso. Revisa el servicio SMTP.'})
+                    db.commit()
+                    return self.send(200, {'requires_verification':True,'purpose':purpose,'message':'Código enviado al correo. Compruébalo para entrar.'})
+                if path == '/api/auth/verify' and method == 'POST':
+                    email = str(data.get('email','')).strip().lower()
+                    purpose = str(data.get('purpose',''))
+                    code = data.get('code','')
+                    if purpose not in ('register','login') or not otp_check(db,email,purpose,code):
+                        db.commit()
+                        return self.send(400,{'error':'Código incorrecto, vencido o demasiados intentos.'})
+                    row = db.execute('SELECT * FROM users WHERE email=?',(email,)).fetchone()
+                    if not row: return self.send(400,{'error':'Código inválido.'})
+                    if not row['verified_at']:
+                        db.execute('UPDATE users SET verified_at=? WHERE id=?',(datetime.now(timezone.utc).isoformat(),row['id']))
+                    db.execute("DELETE FROM email_codes WHERE email=? AND purpose IN ('register','login')",(email,))
+                    token = issue_token(db,row['id'])
+                    db.commit()
+                    return self.send(200,{'token':token,'user':public_user(row)})
+                if path == '/api/auth/resend' and method == 'POST':
+                    email = str(data.get('email','')).strip().lower()
+                    purpose = str(data.get('purpose',''))
+                    if purpose not in ('register','login','reset'):
+                        return self.send(400, {'error':'Tipo de código inválido.'})
+                    pending = db.execute('SELECT 1 FROM email_codes WHERE email=? AND purpose=?',(email,purpose)).fetchone()
+                    if pending:
+                        if not mail_ready(): return self.send(503,{'error':'El correo SMTP no está configurado.'})
+                        try: otp_create(db,email,purpose)
+                        except ValueError as e: return self.send(429,{'error':str(e)})
+                        except Exception:
+                            db.rollback()
+                            return self.send(503,{'error':'No se pudo reenviar el código.'})
+                    db.commit()
+                    return self.send(200,{'message':'Si hay una solicitud vigente, recibirás un nuevo código.'})
                 if path == '/api/auth/forgot' and method == 'POST':
-                    # No account-enumeration. An email provider + reset-token workflow must be configured before production use.
-                    return self.send(200, {'message':'Si existe una cuenta, recibirás instrucciones cuando se configure el correo.'})
+                    email = str(data.get('email','')).strip().lower()
+                    if not mail_ready(): return self.send(503,{'error':'El envío de correos no está configurado. Consulta backend/.env.'})
+                    row = db.execute('SELECT * FROM users WHERE email=?',(email,)).fetchone() if '@' in email else None
+                    if row:
+                        try: otp_create(db,email,'reset')
+                        except ValueError: pass  # Same answer prevents account discovery.
+                        except Exception:
+                            db.rollback()
+                            return self.send(503,{'error':'No se pudo contactar el servicio de correo.'})
+                    db.commit()
+                    return self.send(200,{'message':'Si existe la cuenta, recibirás un código de recuperación.'})
+                if path == '/api/auth/reset' and method == 'POST':
+                    email = str(data.get('email','')).strip().lower()
+                    password = data.get('new_password','')
+                    problem = validate_password(password)
+                    if problem:return self.send(400,{'error':problem})
+                    if not otp_check(db,email,'reset',data.get('code','')):
+                        db.commit()
+                        return self.send(400,{'error':'Código incorrecto, vencido o demasiados intentos.'})
+                    row=db.execute('SELECT id FROM users WHERE email=?',(email,)).fetchone()
+                    if not row: return self.send(400,{'error':'Código inválido.'})
+                    db.execute('UPDATE users SET password_hash=?,verified_at=? WHERE id=?', (hashed(password),datetime.now(timezone.utc).isoformat(),row['id']))
+                    db.execute('DELETE FROM sessions WHERE user_id=?',(row['id'],))
+                    db.execute('DELETE FROM email_codes WHERE email=?',(email,))
+                    db.commit()
+                    return self.send(200,{'message':'Contraseña actualizada. Inicia sesión con tu nueva contraseña.'})
                 user = self.current_user(db)
                 if not user:
                     return self.send(401, {'error':'Debes iniciar sesión.'})
+                # All logged-in users may read bus telemetry. Never expose device secrets.
+                if path == '/api/gps/buses' and method == 'GET':
+                    now=datetime.now(timezone.utc)
+                    output=[]
+                    for device in db.execute('SELECT id,label,route_id FROM bus_devices ORDER BY id LIMIT 100'):
+                        positions=db.execute('SELECT lat,lng,accuracy,recorded_at FROM bus_positions WHERE device_id=? ORDER BY id DESC LIMIT 150',(device['id'],)).fetchall()
+                        if not positions: continue
+                        last=positions[0]
+                        age=(now-datetime.fromisoformat(last['recorded_at'])).total_seconds()
+                        output.append({'id':device['id'],'label':device['label'],'route_id':device['route_id'],
+                                       'active':0 <= age <= 120,
+                                       'updated_at':last['recorded_at'],
+                                       'lat':last['lat'],'lng':last['lng'],
+                                       'accuracy':last['accuracy'],
+                                       'trail':[{'lat':p['lat'],'lng':p['lng']} for p in reversed(positions)]})
+                    return self.send(200, {'buses':output,'source':'gps_devices','demo':True})
+                if path == '/api/admin/gps/devices' and method == 'GET':
+                    if user['role'] != 'worker':return self.send(403, {'error':'Solo un administrador puede gestionar dispositivos GPS.'})
+                    return self.send(200, {'devices':[dict(row) for row in db.execute('SELECT id,label,route_id,created_at FROM bus_devices ORDER BY id')]})
+                if path == '/api/admin/gps/devices' and method == 'POST':
+                    if user['role'] != 'worker':return self.send(403, {'error':'Solo un administrador puede registrar dispositivos GPS.'})
+                    label,route_id=data.get('label'),data.get('route_id')
+                    if not isinstance(label,str) or not 2<=len(label.strip())<=60 or not isinstance(route_id,str) or not 1<=len(route_id.strip())<=32:
+                        return self.send(400,{'error':'Indica nombre de bus (2-60) y número de ruta (1-32).'} )
+                    key=secrets.token_urlsafe(36)
+                    cur=db.execute('INSERT INTO bus_devices(label,route_id,secret_hash) VALUES(?,?,?)',(label.strip(),route_id.strip(),hashlib.sha256(key.encode()).hexdigest()))
+                    db.commit()
+                    return self.send(201,{'id':cur.lastrowid,'device_key':key,'message':'Copia la clave ahora; no volverá a mostrarse.'})
+                if len(parts)==5 and parts[:4]==['api','admin','gps','devices'] and parts[4].isdigit() and method=='DELETE':
+                    if user['role'] != 'worker':return self.send(403,{'error':'Solo el administrador puede revocar dispositivos.'})
+                    cur=db.execute('DELETE FROM bus_devices WHERE id=?',(int(parts[4]),))
+                    db.commit()
+                    return self.send(200 if cur.rowcount else 404,{'message':'Dispositivo revocado.'} if cur.rowcount else {'error':'No encontrado.'})
+                if path == '/api/gps/tracks' and method == 'POST':
+                    if user['role'] != 'worker':return self.send(403, {'error':'Solo un administrador puede registrar recorridos.'})
+                    points=valid_track(data.get('points'))
+                    if not points:return self.send(400,{'error':'Recorrido GPS inválido (2 a 1500 puntos, máximo 8 horas).'})
+                    db.execute('INSERT INTO gps_tracks(user_id,points) VALUES (?,?)',(user['id'],json.dumps(points,separators=(',',':'))))
+                    db.commit()
+                    return self.send(201, {'message':'Recorrido guardado de forma privada.','points':len(points)})
+                if path == '/api/gps/tracks' and method == 'GET':
+                    if user['role'] != 'worker':return self.send(403, {'error':'Solo un administrador puede consultar las grabaciones.'})
+                    rows=db.execute('SELECT id,created_at,points FROM gps_tracks WHERE user_id=? ORDER BY id DESC LIMIT 10',(user['id'],)).fetchall()
+                    return self.send(200,{'tracks':[{'id':r['id'],'created_at':r['created_at'],'points':json.loads(r['points'])} for r in rows]})
+                if len(parts)==4 and parts[:3]==['api','gps','tracks'] and method=='DELETE' and parts[3].isdigit():
+                    if user['role'] != 'worker':return self.send(403, {'error':'Solo el administrador puede eliminar recorridos.'})
+                    db.execute('DELETE FROM gps_tracks WHERE id=? AND user_id=?',(int(parts[3]),user['id']))
+                    db.commit()
+                    return self.send(200,{'message':'Recorrido eliminado.'})
                 if path == '/api/auth/me' and method == 'GET':
                     return self.send(200, {'user':public_user(user)})
                 if path == '/api/auth/logout' and method == 'POST':

@@ -1,3 +1,9 @@
+# Wayvo v1.2 — correo y GPS de buses
+
+Consulta **ACTUALIZACION_V1_2_CORREO_GPS_BUSES.md** para configurar el correo Gmail real, crear un administrador, conectar dispositivos GPS de buses y ejecutar el simulador de demostración.
+
+> **Novedad Wayvo v1.1:** código de 6 dígitos por correo para registro/inicio de sesión, recuperación de contraseña, passwords fuertes de 8–12 caracteres y grabación GPS en el mapa. **Antes de iniciar sesión configura SMTP en `backend/.env`**. Guía: [ACTUALIZACION_SEGURIDAD_GPS_V1_1.md](ACTUALIZACION_SEGURIDAD_GPS_V1_1.md).
+
 > **Nuevo en v1.0 (iPhone + Ruta Express):** eliminada la barra inferior, accesos directos desde Inicio, mapa pulsable, ajuste a altura visible de Safari y Ruta Express siempre disponible al entrar a IA. Consulta [ACTUALIZACION_NAV_IOS_V1.md](ACTUALIZACION_NAV_IOS_V1.md).
 
 > **Nuevo en v0.9:** Ruta Express dentro de Wayvo IA: escoge origen y destino para recibir el bus, paraderos, transbordos, tiempo y tarifa de demostración sin escribir en el chat. Ver [ACTUALIZACION_RUTA_EXPRESS.md](ACTUALIZACION_RUTA_EXPRESS.md).
