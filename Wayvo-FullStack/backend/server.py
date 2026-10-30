@@ -155,6 +155,11 @@ def init():
         );
         CREATE INDEX IF NOT EXISTS records_section ON records(section);
         CREATE TABLE IF NOT EXISTS social_accounts(provider TEXT NOT NULL,subject TEXT NOT NULL,user_id INTEGER NOT NULL REFERENCES users(id),PRIMARY KEY(provider,subject));
+        -- Google account linking is temporary and only completed after a valid Wayvo email OTP.
+        CREATE TABLE IF NOT EXISTS pending_google_links (
+          email TEXT PRIMARY KEY, firebase_subject TEXT NOT NULL UNIQUE,
+          expires_at TEXT NOT NULL
+        );
         CREATE TABLE IF NOT EXISTS oauth_pending(state_hash TEXT PRIMARY KEY, provider TEXT NOT NULL, mode TEXT NOT NULL, expires_at TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS oauth_tickets(ticket_hash TEXT PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id),expires_at TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS email_codes (
@@ -367,11 +372,29 @@ class Handler(BaseHTTPRequestHandler):
                         purpose='login' if user['verified_at'] is not None else 'register'
                         email=user['email']
                     else:
-                        # Never silently connect an existing local/admin user by email:
-                        # linked identities need deliberate, authenticated account linking.
+                        # Never silently link by matching emails: prompt first, then
+                        # require a fresh 6-digit code delivered to the existing address.
                         existing=db.execute('SELECT id FROM users WHERE email=?',(email,)).fetchone()
                         if existing:
-                            return self.send(409,{'error':'Este correo ya tiene una cuenta Wayvo. Entra con tu correo y contraseña; no vinculamos cuentas automáticamente.'})
+                            if data.get('confirm_link') is not True:
+                                return self.send(200,{'requires_link':True,'email':email})
+                            expiry=(datetime.now(timezone.utc)+timedelta(minutes=10)).isoformat()
+                            try:
+                                db.execute('''INSERT INTO pending_google_links(email,firebase_subject,expires_at)
+                                    VALUES(?,?,?) ON CONFLICT(email) DO UPDATE
+                                    SET firebase_subject=excluded.firebase_subject, expires_at=excluded.expires_at''',(email,subject,expiry))
+                                otp_create(db,email,'google_link')
+                            except ValueError as exc:
+                                db.rollback()
+                                return self.send(429,{'error':str(exc)})
+                            except sqlite3.IntegrityError:
+                                db.rollback()
+                                return self.send(409,{'error':'Esta cuenta de Google ya está asociada a otra solicitud.'})
+                            except Exception:
+                                db.rollback()
+                                return self.send(503,{'error':'No se pudo enviar el código de vinculación. Revisa SMTP.'})
+                            db.commit()
+                            return self.send(200,{'requires_verification':True,'purpose':'google_link','email':email})
                         try:
                             db.execute('INSERT INTO users(name,email,password_hash,role) VALUES(?,?,?,?)',
                                 (identity['name'],email,hashed(secrets.token_urlsafe(48)),'client'))
@@ -533,6 +556,35 @@ class Handler(BaseHTTPRequestHandler):
                     email = str(data.get('email','')).strip().lower()
                     purpose = str(data.get('purpose',''))
                     code = data.get('code','')
+                    if purpose == 'google_link':
+                        pending=db.execute('SELECT * FROM pending_google_links WHERE email=? AND expires_at>?',
+                            (email,datetime.now(timezone.utc).isoformat())).fetchone()
+                        # A code by itself cannot link an identity: it must match an
+                        # unexpired request backed by a verified Firebase Google token.
+                        if not pending or not otp_check(db,email,'google_link',code):
+                            db.commit()
+                            return self.send(400,{'error':'Código de vinculación incorrecto o vencido. Vuelve a entrar con Google.'})
+                        row=db.execute('SELECT * FROM users WHERE email=?',(email,)).fetchone()
+                        if not row:
+                            db.rollback()
+                            return self.send(400,{'error':'La cuenta Wayvo ya no existe.'})
+                        if db.execute('SELECT 1 FROM social_accounts WHERE provider=? AND subject=?',
+                            ('firebase_google',pending['firebase_subject'])).fetchone():
+                            db.rollback()
+                            return self.send(409,{'error':'La cuenta de Google ya está vinculada a otro usuario.'})
+                        try:
+                            db.execute('INSERT INTO social_accounts(provider,subject,user_id) VALUES(?,?,?)',
+                                ('firebase_google',pending['firebase_subject'],row['id']))
+                        except sqlite3.IntegrityError:
+                            db.rollback()
+                            return self.send(409,{'error':'No se pudo completar la vinculación. Intenta nuevamente.'})
+                        db.execute('DELETE FROM pending_google_links WHERE email=?',(email,))
+                        if not row['verified_at']:
+                            db.execute('UPDATE users SET verified_at=? WHERE id=?',
+                                (datetime.now(timezone.utc).isoformat(),row['id']))
+                        token=issue_token(db,row['id'])
+                        db.commit()
+                        return self.send(200,{'token':token,'user':public_user(row)})
                     if purpose not in ('register','login') or not otp_check(db,email,purpose,code):
                         db.commit()
                         return self.send(400,{'error':'Código incorrecto, vencido o demasiados intentos.'})
@@ -547,8 +599,12 @@ class Handler(BaseHTTPRequestHandler):
                 if path == '/api/auth/resend' and method == 'POST':
                     email = str(data.get('email','')).strip().lower()
                     purpose = str(data.get('purpose',''))
-                    if purpose not in ('register','login','reset'):
+                    if purpose not in ('register','login','reset','google_link'):
                         return self.send(400, {'error':'Tipo de código inválido.'})
+                    if purpose == 'google_link' and not db.execute(
+                        'SELECT 1 FROM pending_google_links WHERE email=? AND expires_at>?',
+                        (email,datetime.now(timezone.utc).isoformat())).fetchone():
+                        return self.send(400,{'error':'La vinculación expiró. Vuelve a entrar con Google.'})
                     pending = db.execute('SELECT 1 FROM email_codes WHERE email=? AND purpose=?',(email,purpose)).fetchone()
                     if pending:
                         if not mail_ready(): return self.send(503,{'error':'El correo SMTP no está configurado.'})

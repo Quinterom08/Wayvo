@@ -20,6 +20,7 @@ type Screen =
 type TabId = "home" | "assistant" | "routes" | "map" | "trips" | "profile" | "admin";
 type AuthRole = "client" | "worker";
 type AuthMode = "login" | "register" | "forgot" | "verify" | "reset";
+type VerificationPurpose = "login" | "register" | "google_link";
 
 interface AppUser { name: string; email: string; isAdmin: boolean }
 interface StoredUser { name: string; email: string; password: string; role: AuthRole }
@@ -282,7 +283,9 @@ function AuthScreen({onLogin, socialChallenge}: {onLogin: (u: AppUser) => void; 
   const [err, setErr]     = useState("");
   const [success, setSuccess] = useState("");
   const [otp, setOtp] = useState("");
-  const [purpose, setPurpose] = useState<"login"|"register">("login");
+  const [purpose, setPurpose] = useState<VerificationPurpose>("login");
+  // Firebase's token is kept only in component memory while the owner opts in.
+  const [googleLink, setGoogleLink] = useState<{email:string;idToken:string}|null>(null);
   const [newPass, setNewPass] = useState("");
   const [newConfirm, setNewConfirm] = useState("");
   useEffect(() => {
@@ -333,10 +336,16 @@ function AuthScreen({onLogin, socialChallenge}: {onLogin: (u: AppUser) => void; 
       const credential = await signInWithPopup(firebaseAuth, provider);
       try {
         const idToken = await credential.user.getIdToken();
-        const result = await api<{requires_verification:boolean; purpose:"login"|"register"; email:string}>(
+        const result = await api<{requires_verification?:boolean; requires_link?:boolean; purpose?:VerificationPurpose; email:string}>(
           "/auth/firebase/google", {method:"POST",body:JSON.stringify({id_token:idToken})}
         );
-        if (!result.requires_verification) throw new Error("No se pudo iniciar la verificación de correo.");
+        if (result.requires_link) {
+          setGoogleLink({idToken,email:result.email});
+          setSuccess("");
+          return;
+        }
+        if (!result.requires_verification || !result.purpose) throw new Error("No se pudo iniciar la verificación de correo.");
+        setGoogleLink(null);
         setEmail(result.email);setPurpose(result.purpose);setOtp("");setPass("");
         setMode("verify");setSuccess("Google confirmó tu identidad. Revisa tu correo para el código de Wayvo.");
       } finally {
@@ -352,6 +361,20 @@ function AuthScreen({onLogin, socialChallenge}: {onLogin: (u: AppUser) => void; 
         e instanceof Error ? e.message : "No se pudo iniciar con Google.";
       setErr(msg);
     } finally { setLoading(false); }
+  };
+
+  const confirmGoogleLink = async () => {
+    if (!googleLink) return;
+    setLoading(true);setErr("");
+    try {
+      const result = await api<{requires_verification:boolean; purpose:VerificationPurpose; email:string}>(
+        "/auth/firebase/google", {method:"POST", body:JSON.stringify({id_token:googleLink.idToken,confirm_link:true})}
+      );
+      if (!result.requires_verification || result.purpose !== "google_link") throw new Error("No se pudo solicitar la vinculación.");
+      setEmail(result.email);setPurpose("google_link");setOtp("");setPass("");setGoogleLink(null);
+      setMode("verify");setSuccess("Te enviamos un código de 6 dígitos para vincular tu cuenta existente con Google.");
+    } catch(e) {setErr(e instanceof Error?e.message:"No se pudo vincular Google.");}
+    finally {setLoading(false);}
   };
 
   const doRegister = async () => {
@@ -383,7 +406,7 @@ function AuthScreen({onLogin, socialChallenge}: {onLogin: (u: AppUser) => void; 
     } catch(e){setErr(e instanceof Error?e.message:"No se pudo validar el código.");}
     finally {setLoading(false);}
   };
-  const doResend = async (kind: "register"|"login"|"reset") => {
+  const doResend = async (kind: VerificationPurpose | "reset") => {
     setLoading(true);setErr("");
     try {await api("/auth/resend",{method:"POST",body:JSON.stringify({email:email.trim(),purpose:kind})});setSuccess("Si había un código pendiente, recibirás otro correo.");}
     catch(e){setErr(e instanceof Error?e.message:"No se pudo reenviar.");}
@@ -427,7 +450,13 @@ function AuthScreen({onLogin, socialChallenge}: {onLogin: (u: AppUser) => void; 
         <button type="button" disabled={loading} onClick={socialLogin} className="retro-social w-full border border-gray-200 bg-white rounded-xl py-3 text-sm font-semibold text-gray-700 flex items-center justify-center gap-2 disabled:opacity-60">
           <span className="retro-google-g" aria-hidden="true">G</span> Continuar con Google
         </button>
-        <button onClick={() => { setMode("forgot"); setErr(""); setEmail(""); }}
+        {googleLink && <div className="mt-3 p-3 rounded-xl border-2 border-[#7c9a80] bg-[#fffdf1] text-left" role="status">
+          <p className="text-sm font-bold text-[#1b4935]">Tu cuenta Wayvo ya existe</p>
+          <p className="text-xs text-[#526957] my-2">¿Quieres vincular Google a <strong className="break-all">{googleLink.email}</strong>? Conservaremos tus datos y necesitarás confirmar un código por correo.</p>
+          <button type="button" onClick={confirmGoogleLink} disabled={loading} className="retro-primary w-full bg-[#1b4935] text-white rounded-lg p-2.5 text-xs font-bold disabled:opacity-60">Vincular Google y enviar código</button>
+          <button type="button" onClick={()=>setGoogleLink(null)} className="block w-full text-xs text-[#526957] mt-2 p-1" disabled={loading}>Cancelar</button>
+        </div>}
+        <button onClick={() => { setGoogleLink(null); setMode("forgot"); setErr(""); setEmail(""); }}
           className="w-full text-center text-xs text-green-700 mt-3 hover:underline font-medium py-1">
           ¿Olvidaste tu contraseña?
         </button>

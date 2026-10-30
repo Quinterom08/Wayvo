@@ -11,7 +11,7 @@ import ssl
 from email.message import EmailMessage
 from pathlib import Path
 
-PURPOSES = {'register': 'Confirma tu cuenta', 'login': 'Tu acceso seguro', 'reset': 'Recupera tu contraseña'}
+PURPOSES = {'register': 'Confirma tu cuenta', 'login': 'Tu acceso seguro', 'reset': 'Recupera tu contraseña', 'google_link': 'Vincula tu cuenta con Google'}
 
 
 def validate_password(password: str) -> str | None:
@@ -39,6 +39,7 @@ def compose_mail(purpose: str, code: str) -> tuple[str, str, str]:
         'register': 'Para activar tu cuenta y comenzar a viajar con Wayvo, verifica tu correo.',
         'login': 'Recibimos una solicitud para entrar a Wayvo. Confirma que eres tú.',
         'reset': 'Recibimos una solicitud para cambiar tu contraseña. Usa este código para continuar.',
+        'google_link': 'Solicitaste vincular Google a tu cuenta Wayvo. Confirma esta acción con el código.',
     }[purpose]
     subject = f'Wayvo · {title}'
     plain = f'WAYVO\n\n{title}\n{description}\n\nTu código: {code}\n\nVálido por 10 minutos. No lo compartas. Si no fuiste tú, ignora este mensaje.'
