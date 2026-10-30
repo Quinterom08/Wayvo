@@ -44,6 +44,8 @@ export function WayvoLeafletMap({ activeRoute = null, compact = false, onRouteSe
   const locationRef = useRef<L.LayerGroup | null>(null);
   const trackLineRef = useRef<L.Polyline | null>(null);
   const watchIdRef = useRef<number | null>(null);
+  const locationWatchIdRef = useRef<number | null>(null);
+  const firstGpsFixRef = useRef(true);
   const busLayerRef = useRef<L.LayerGroup | null>(null);
   const loadBusesRef = useRef(onLoadBuses);
   loadBusesRef.current = onLoadBuses;
@@ -135,6 +137,7 @@ export function WayvoLeafletMap({ activeRoute = null, compact = false, onRouteSe
       cancelAnimationFrame(frame);
       resize.disconnect();
       if (watchIdRef.current !== null) navigator.geolocation?.clearWatch(watchIdRef.current);
+      if (locationWatchIdRef.current !== null) navigator.geolocation?.clearWatch(locationWatchIdRef.current);
       watchIdRef.current = null;
       busLayerRef.current = null;
       trackLineRef.current = null;
@@ -190,47 +193,35 @@ export function WayvoLeafletMap({ activeRoute = null, compact = false, onRouteSe
     return ()=>{cancelled=true;window.clearInterval(timer);};
   }, [compact]);
 
+  // Viewer GPS: continuous position on the map after an explicit tap, never saved
+  // as a bus journey and never uploaded to the Wayvo backend.
   function locate() {
-    if (!navigator.geolocation) {
-      setError('Este dispositivo no tiene geolocalización disponible.');
+    if (!navigator.geolocation) {setError('Este dispositivo no tiene geolocalización disponible.');return;}
+    if (!window.isSecureContext) {setError('El GPS requiere HTTPS. En iPhone, abrir la IP del PC por HTTP no permite utilizar la ubicación.');return;}
+    if (locationWatchIdRef.current !== null) {
+      const map=mapRef.current;
+      if(gpsPosition && map) map.setView(gpsPosition,15,{animate:true});
       return;
     }
-    setLocating(true);
-    setError('');
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        const point: L.LatLngTuple = [position.coords.latitude, position.coords.longitude];
-        setGpsPosition(point);
-        setLocating(false);
-        const map = mapRef.current;
-        if (!map) return;
-        locationRef.current?.remove();
-        const marker = L.circleMarker(point, {
-          radius: 8,
-          color: '#fffef3',
-          weight: 3,
-          fillColor: '#1b4935',
-          fillOpacity: 1,
-        }).bindPopup('Tu ubicación GPS aproximada');
-        const accuracy = L.circle(point, {
-          radius: Math.min(position.coords.accuracy || 25, 2000),
-          color: '#286447',
-          weight: 1,
-          fillColor: '#286447',
-          fillOpacity: 0.1,
-        });
-        locationRef.current = L.layerGroup([accuracy, marker]).addTo(map);
-        map.setView(point, 15, { animate: true });
-        marker.openPopup();
-      },
-      (cause) => {
-        setLocating(false);
-        setError(cause.code === 1
-          ? 'Acceso a ubicación denegado. Permite el GPS en los ajustes del dispositivo.'
-          : 'No se pudo obtener el GPS. Usa HTTPS o localhost y comprueba tu ubicación.');
-      },
-      { enableHighAccuracy: true, timeout: 12000, maximumAge: 15000 },
-    );
+    setLocating(true);setError('');firstGpsFixRef.current=true;
+    locationWatchIdRef.current=navigator.geolocation.watchPosition((position)=>{
+      const point:L.LatLngTuple=[position.coords.latitude,position.coords.longitude];
+      setGpsPosition(point);setLocating(false);
+      const map=mapRef.current;
+      if(!map)return;
+      locationRef.current?.remove();
+      const accuracyCircle=L.circle(point,{radius:Math.min(position.coords.accuracy||25,2000),color:'#286447',weight:1,fillColor:'#286447',fillOpacity:0.10});
+      const marker=L.circleMarker(point,{radius:8,color:'#fffef3',weight:3,fillColor:'#1b4935',fillOpacity:1})
+        .bindPopup(`Tu ubicación aproximada · ±${Math.round(position.coords.accuracy||0)} m`);
+      locationRef.current=L.layerGroup([accuracyCircle,marker]).addTo(map);
+      // On first fix center, then let the user explore without jumping the map.
+      if(firstGpsFixRef.current){firstGpsFixRef.current=false;map.setView(point,compact?13:15,{animate:true});}
+    },(cause)=>{
+      setLocating(false);
+      if(locationWatchIdRef.current!==null)navigator.geolocation.clearWatch(locationWatchIdRef.current);
+      locationWatchIdRef.current=null;
+      setError(cause.code===1?'Acceso a ubicación denegado. Habilítalo en los ajustes del dispositivo.':'No se pudo obtener tu ubicación. Activa el GPS y prueba desde HTTPS.');
+    },{enableHighAccuracy:true,timeout:15000,maximumAge:10000});
   }
 
   function distanceMeters(a:GpsPoint,b:GpsPoint) {
@@ -325,9 +316,12 @@ export function WayvoLeafletMap({ activeRoute = null, compact = false, onRouteSe
       <div className="absolute top-3 left-3 max-w-[70%] z-[500] rounded-xl bg-[#fffdf1]/95 border border-[#74917b] px-3 py-2 text-[10px] font-extrabold text-[#1b4935] shadow-md pointer-events-none">
         OPENSTREETMAP · DEMOSTRACIÓN
       </div>
-      {!compact && <button type="button" onClick={locate} disabled={locating} aria-label="Centrar mapa en mi ubicación GPS" title="Mi ubicación" className="absolute z-[500] top-3 right-3 bg-[#fffdf1] border-2 border-[#1b4935] rounded-xl p-2.5 text-[#1b4935] shadow-md disabled:opacity-60">
+      <button type="button" onClick={(event)=>{event.stopPropagation();locate();}} disabled={locating}
+        aria-label="Activar GPS y localizarme" title="Mi ubicación (GPS en directo)"
+        className="absolute z-[500] top-3 right-3 bg-[#fffdf1] border-2 border-[#1b4935] rounded-xl p-2.5 text-[#1b4935] shadow-md disabled:opacity-60 flex gap-1 items-center">
         <LocateFixed size={19} className={locating ? 'animate-pulse' : ''} />
-      </button>}
+        {compact && <span className="text-[10px] font-black">Mi GPS</span>}
+      </button>
       {!compact && isAdmin && <div className="absolute z-[500] top-16 left-2 right-2 pointer-events-none flex flex-col items-start gap-1">
         <div className="rounded-xl bg-[#fffdf1]/95 border border-[#74917b] shadow-md p-2 pointer-events-auto max-w-full">
           <p className="text-[11px] font-black text-[#1b4935] mb-1">{tracking?'● GRABANDO GPS':'REGISTRAR RECORRIDO GPS'}</p>
@@ -343,7 +337,7 @@ export function WayvoLeafletMap({ activeRoute = null, compact = false, onRouteSe
           {savedTracks.length>0 && <div className="max-h-28 overflow-y-auto mt-1 space-y-1">{savedTracks.map(t=><div key={t.id} className="flex gap-1 w-full"><button onClick={()=>showSaved(t.points)} className="flex-1 rounded-md bg-[#e8efdc] text-[#1b4935] p-1.5 text-left text-[10px] font-semibold">Recorrido #{t.id} · {t.created_at} · {t.points.length} puntos</button><button onClick={()=>deleteSaved(t.id)} className="bg-[#f8e8de] text-[#783e34] rounded-md px-2 text-[10px]" aria-label={`Eliminar recorrido ${t.id}`}><Trash2 size={12}/></button></div>)}</div>}
         </div>
       </div>}
-      {!compact && gpsPosition && <div className="absolute z-[500] top-14 right-2 bg-[#fffdf1] rounded-md px-2 py-1 text-[10px] font-bold text-[#1b4935] border border-[#74917b]">GPS activo</div>}
+      {gpsPosition && <div className="absolute z-[500] top-16 right-2 bg-[#fffdf1] rounded-md px-2 py-1 text-[10px] font-bold text-[#1b4935] border border-[#74917b]">● GPS activo</div>}
       {error && <div role="alert" className="absolute z-[500] left-2 right-2 bottom-16 rounded-xl bg-[#fff8db]/95 border border-[#b57c45] p-2 flex items-start gap-2 text-xs text-[#663d20] shadow-md"><AlertCircle size={16} className="shrink-0" />{error}</div>}
       {!compact && <div className="absolute z-[500] left-2 bottom-16 max-w-[78%] rounded-lg bg-[#fffdf1]/95 border border-[#74917b] px-2 py-1 text-[10px] font-bold text-[#1b4935] pointer-events-none">{busStatus}</div>}
       {compact && <div className="wayvo-preview-tap absolute z-[500] right-3 top-14 pointer-events-none">Toca el mapa para ampliar ↗</div>}

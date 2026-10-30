@@ -162,7 +162,8 @@ class AuthenticationTests(unittest.TestCase):
         self.assertEqual(self.call('POST','/api/gps/device/position',{'lat':6.3,'lng':-75.56},extra_headers={'X-Wayvo-Device-Key':key})[0],401)
 
     def test_social_status_without_secrets(self):
-        for provider in ('google','microsoft'):
-            status,body=self.call('GET',f'/api/auth/oauth/{provider}/status')
-            self.assertEqual(status,200);self.assertFalse(body['configured'])
+        status,body=self.call('GET','/api/auth/oauth/google/status')
+        self.assertEqual(status,200);self.assertFalse(body['configured'])
+        # Microsoft is intentionally not offered by Wayvo anymore.
+        self.assertEqual(self.call('GET','/api/auth/oauth/microsoft/status')[0],503)
 if __name__=='__main__':unittest.main()

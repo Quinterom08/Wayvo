@@ -15,6 +15,13 @@ from pathlib import Path
 from urllib.parse import unquote, urlsplit, urlencode, parse_qs
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError
+
+# Google ID tokens are verified using Google signing certificates;
+# no service-account JSON or Gmail password is sent to the browser.
+try:
+    import jwt
+except ImportError:
+    jwt = None
 from assistant_chat import chat_reply, demo_stops, quick_route
 from mail_security import validate_password, send_code, ready as mail_ready
 from gps_helpers import valid_track
@@ -49,7 +56,7 @@ def fetch_json(url, body=None, headers=None):
         return json.loads(res.read(65536))
 
 def oauth_config(provider):
-    if provider not in ('google', 'microsoft'): return None
+    if provider != 'google': return None
     key = provider.upper()
     client = os.environ.get('WAYVO_'+key+'_CLIENT_ID', '')
     secret = os.environ.get('WAYVO_'+key+'_CLIENT_SECRET', '')
@@ -57,9 +64,58 @@ def oauth_config(provider):
     if not client or not secret or not base.startswith('https://'): return None
     if provider == 'google':
         return dict(client=client, secret=secret, authorization='https://accounts.google.com/o/oauth2/v2/auth', token='https://oauth2.googleapis.com/token', userinfo='https://openidconnect.googleapis.com/v1/userinfo', scope='openid email profile', base=base)
-    tenant = os.environ.get('WAYVO_MICROSOFT_TENANT','common')
-    if tenant not in ('common','organizations','consumers') and not all(c.isalnum() or c=='-' for c in tenant): return None
-    return dict(client=client,secret=secret, authorization=f'https://login.microsoftonline.com/{tenant}/oauth2/v2.0/authorize',token=f'https://login.microsoftonline.com/{tenant}/oauth2/v2.0/token',userinfo='https://graph.microsoft.com/oidc/userinfo',scope='openid email profile',base=base)
+
+# Verify Firebase Google sign-in independently of the browser.
+# This follows Firebase's published ID-token signature, issuer and audience checks.
+_GOOGLE_CERTS_URL = 'https://www.googleapis.com/robot/v1/metadata/x509/securetoken@system.gserviceaccount.com'
+_CERT_CACHE = {'certs': {}, 'until': 0.0}
+_CERT_LOCK = threading.Lock()
+
+def verify_firebase_google_id_token(id_token):
+    if jwt is None:
+        raise RuntimeError('Falta PyJWT. Instala: python -m pip install -r backend/requirements.txt')
+    project = os.environ.get('WAYVO_FIREBASE_PROJECT_ID', 'wayvo-fde6b').strip()
+    if not project or not isinstance(id_token, str) or len(id_token) > 8192:
+        raise ValueError('Token de Firebase inválido')
+    try:
+        header = jwt.get_unverified_header(id_token)
+    except jwt.PyJWTError as exc:
+        raise ValueError('Token de Firebase malformado') from exc
+    if header.get('alg') != 'RS256' or not isinstance(header.get('kid'), str):
+        raise ValueError('Firma de Firebase no admitida')
+    with _CERT_LOCK:
+        if time.monotonic() > _CERT_CACHE['until']:
+            req = Request(_GOOGLE_CERTS_URL, headers={'User-Agent':'Wayvo-auth/1.0'})
+            with urlopen(req, timeout=8) as response:
+                certs = json.loads(response.read(100000))
+                # Don't cache invalid/unexpected responses.
+                if not isinstance(certs,dict) or not certs:
+                    raise ValueError('Certificados de Google no disponibles')
+                cache_control=response.headers.get('Cache-Control','')
+                match = __import__('re').search(r'max-age=(\d+)', cache_control)
+                seconds=min(int(match.group(1)), 3600) if match else 300
+                _CERT_CACHE.update(certs=certs, until=time.monotonic()+max(seconds,60))
+        certificate=_CERT_CACHE['certs'].get(header['kid'])
+    if not certificate:
+        # Unknown key: fail closed, and allow a fresh fetch next attempt (key rotation).
+        with _CERT_LOCK: _CERT_CACHE['until']=0
+        raise ValueError('Firma desconocida. Intenta de nuevo.')
+    try:
+        from cryptography import x509
+        public_key = x509.load_pem_x509_certificate(certificate.encode('ascii')).public_key()
+        decoded=jwt.decode(id_token, public_key, algorithms=['RS256'], audience=project,
+                           issuer=f'https://securetoken.google.com/{project}',
+                           options={'require':['exp','iat','aud','iss','sub','auth_time']}, leeway=30)
+    except (jwt.PyJWTError, ValueError, TypeError) as exc:
+        raise ValueError('El token de Firebase no es válido o expiró') from exc
+    if not decoded.get('sub') or len(str(decoded['sub']))>128 or decoded.get('email_verified') is not True:
+        raise ValueError('Google debe proporcionar un correo verificado')
+    if (decoded.get('firebase') or {}).get('sign_in_provider') != 'google.com':
+        raise ValueError('Esta opción es exclusivamente para Google')
+    email=decoded.get('email','')
+    if not isinstance(email,str) or '@' not in email or len(email)>255:
+        raise ValueError('Google no proporcionó un correo válido')
+    return {'uid':str(decoded['sub']), 'email':email.strip().lower(), 'name':str(decoded.get('name') or email.split('@')[0])[:120]}
 
 def connect():
     conn = sqlite3.connect(DB, timeout=15)
@@ -238,7 +294,7 @@ class Handler(BaseHTTPRequestHandler):
             data = self.payload() if method in ('POST', 'PUT', 'PATCH') else {}
             with connect() as db:
                 if path.startswith('/api/auth/oauth/') and method == 'GET':
-                    if len(parts)==5 and parts[4]=='status' and parts[3] in ('google','microsoft'):
+                    if len(parts)==5 and parts[4]=='status' and parts[3]=='google':
                         configured = oauth_config(parts[3]) is not None
                         return self.send(200, {'configured':configured, 'error':None if configured else 'Acceso social aún sin configurar. Añade WAYVO_PUBLIC_API_URL y las credenciales de '+parts[3]+' al servidor (consulta CONFIGURACION.md).'})
                     if len(parts)!=5 or parts[2]!='oauth': return self.send(404,{'error':'Ruta desconocida'})
@@ -288,6 +344,51 @@ class Handler(BaseHTTPRequestHandler):
                         if not web_url.startswith('https://') and not web_url.startswith('http://localhost:'):
                             return self.send(503,{'error':'WAYVO_WEB_URL no configurada'})
                         return self.redirect(web_url+'/?'+urlencode({'ticket':ticket}))
+                # Firebase Google is a separate optional login method. Local Wayvo
+                # email/password, 6-digit OTP and admin roles remain untouched.
+                if path == '/api/auth/firebase/google' and method == 'POST':
+                    if not check_rate(self.client_address[0],path,10):
+                        return self.send(429,{'error':'Demasiados intentos. Vuelve a intentarlo más tarde.'})
+                    if not mail_ready():
+                        return self.send(503,{'error':'Configura Gmail SMTP para recibir el segundo factor de Wayvo.'})
+                    try:
+                        identity=verify_firebase_google_id_token(data.get('id_token',''))
+                    except RuntimeError as exc:
+                        return self.send(503,{'error':str(exc)})
+                    except (ValueError, KeyError):
+                        return self.send(401,{'error':'No se pudo validar el acceso con Google Firebase.'})
+                    except (OSError,HTTPError,TimeoutError):
+                        return self.send(503,{'error':'Google no está disponible para verificar el inicio de sesión.'})
+                    subject=identity['uid'];email=identity['email']
+                    linked=db.execute('SELECT user_id FROM social_accounts WHERE provider=? AND subject=?',('firebase_google',subject)).fetchone()
+                    if linked:
+                        user=db.execute('SELECT * FROM users WHERE id=?',(linked['user_id'],)).fetchone()
+                        if not user: return self.send(409,{'error':'La cuenta vinculada ya no existe.'})
+                        purpose='login' if user['verified_at'] is not None else 'register'
+                        email=user['email']
+                    else:
+                        # Never silently connect an existing local/admin user by email:
+                        # linked identities need deliberate, authenticated account linking.
+                        existing=db.execute('SELECT id FROM users WHERE email=?',(email,)).fetchone()
+                        if existing:
+                            return self.send(409,{'error':'Este correo ya tiene una cuenta Wayvo. Entra con tu correo y contraseña; no vinculamos cuentas automáticamente.'})
+                        try:
+                            db.execute('INSERT INTO users(name,email,password_hash,role) VALUES(?,?,?,?)',
+                                (identity['name'],email,hashed(secrets.token_urlsafe(48)),'client'))
+                            uid=db.execute('SELECT last_insert_rowid()').fetchone()[0]
+                            db.execute('INSERT INTO social_accounts(provider,subject,user_id) VALUES(?,?,?)',('firebase_google',subject,uid))
+                        except sqlite3.IntegrityError:
+                            return self.send(409,{'error':'La cuenta ya fue creada. Vuelve a intentarlo.'})
+                        purpose='register'
+                    try:
+                        otp_create(db,email,purpose)
+                    except ValueError as exc:
+                        return self.send(429,{'error':str(exc)})
+                    except Exception:
+                        db.rollback()
+                        return self.send(503,{'error':'No se pudo enviar el código por correo. Revisa SMTP.'})
+                    db.commit()
+                    return self.send(200,{'requires_verification':True,'purpose':purpose,'email':email})
                 if path == '/api/auth/oauth/exchange' and method == 'POST':
                     ticket=str(data.get('ticket',''))
                     digest=hashlib.sha256(ticket.encode()).hexdigest()

@@ -7,6 +7,8 @@ import {
   Bookmark, Volume2, Moon, Globe, ChevronDown, Bot, LocateFixed, Send, Sparkles, MessageCircle, ArrowLeftRight,
 } from "lucide-react";
 import {WayvoLeafletMap, type GpsPoint, type LiveBus} from "./components/WayvoLeafletMap";
+import { GoogleAuthProvider, signInWithPopup, signOut } from "firebase/auth";
+import { auth as firebaseAuth } from "../firebase";
 
 // ─── TYPES ────────────────────────────────────────────────────────────────────
 
@@ -313,19 +315,43 @@ function AuthScreen({onLogin, socialChallenge}: {onLogin: (u: AppUser) => void; 
     finally { setLoading(false); }
   };
 
-  const socialLogin = async (provider: "google" | "microsoft") => {
+  const socialLogin = async () => {
     setErr(""); setLoading(true);
     try {
-      if (missingNativeApi()) throw new Error("Para usar Google o Microsoft en el teléfono primero configura VITE_API_URL con tu backend público HTTPS.");
-      const status = await api<{ configured: boolean; error?: string }>(`/auth/oauth/${provider}/status`);
-      if (!status.configured) throw new Error(status.error || `El acceso con ${provider} aún requiere configurar las credenciales OAuth en el servidor.`);
-      const url = `${API_BASE}/auth/oauth/${provider}/start?mode=${isNativeApp() ? "mobile" : "web"}`;
+      if (missingNativeApi()) throw new Error("Para iniciar sesión en la app instalada configura VITE_API_URL con el backend HTTPS.");
       if (isNativeApp()) {
+        // Capacitor's WebView cannot reliably finish signInWithPopup.
+        // On native builds keep the existing secure backend OAuth + app deep-link fallback.
+        const status = await api<{configured:boolean;error?:string}>("/auth/oauth/google/status");
+        if (!status.configured) throw new Error("En Android/iOS instalado falta configurar OAuth nativo de Google y el backend HTTPS. En Safari/Chrome web funciona con Firebase.");
         const { Browser } = await import("@capacitor/browser");
-        await Browser.open({ url });
-      } else window.location.assign(url);
-    } catch (e) { setErr(e instanceof Error ? e.message : "No se pudo iniciar el acceso social."); }
-    finally { setLoading(false); }
+        await Browser.open({url:`${API_BASE}/auth/oauth/google/start?mode=mobile`});
+        return;
+      }
+      const provider = new GoogleAuthProvider();
+      provider.setCustomParameters({prompt:"select_account"});
+      const credential = await signInWithPopup(firebaseAuth, provider);
+      try {
+        const idToken = await credential.user.getIdToken();
+        const result = await api<{requires_verification:boolean; purpose:"login"|"register"; email:string}>(
+          "/auth/firebase/google", {method:"POST",body:JSON.stringify({id_token:idToken})}
+        );
+        if (!result.requires_verification) throw new Error("No se pudo iniciar la verificación de correo.");
+        setEmail(result.email);setPurpose(result.purpose);setOtp("");setPass("");
+        setMode("verify");setSuccess("Google confirmó tu identidad. Revisa tu correo para el código de Wayvo.");
+      } finally {
+        // Wayvo's backend session is the only app session; do not leave two parallel logins.
+        await signOut(firebaseAuth).catch(()=>{});
+      }
+    } catch (e) {
+      const code = (e as {code?:string})?.code || "";
+      const msg = code === "auth/popup-closed-by-user" ? "Cerraste la ventana de Google." :
+        code === "auth/popup-blocked" ? "Tu navegador bloqueó la ventana de Google. Permite las ventanas emergentes." :
+        code === "auth/unauthorized-domain" ? "Autoriza este dominio en Firebase Authentication → Settings → Authorized domains." :
+        code === "auth/operation-not-allowed" ? "Activa Google en Firebase Authentication → Sign-in method." :
+        e instanceof Error ? e.message : "No se pudo iniciar con Google.";
+      setErr(msg);
+    } finally { setLoading(false); }
   };
 
   const doRegister = async () => {
@@ -398,10 +424,9 @@ function AuthScreen({onLogin, socialChallenge}: {onLogin: (u: AppUser) => void; 
           </button>
         </div>
         <div className="flex items-center gap-2 my-4"><div className="flex-1 border-t border-gray-200"/><span className="text-xs text-gray-400">o continúa con</span><div className="flex-1 border-t border-gray-200"/></div>
-        <div className="grid grid-cols-2 gap-2">
-          <button disabled={loading} onClick={() => socialLogin("google")} className="retro-social border border-gray-200 bg-white rounded-xl py-3 text-sm font-semibold text-gray-700"><span className="retro-google-g">G</span> Google</button>
-          <button disabled={loading} onClick={() => socialLogin("microsoft")} className="retro-social border border-gray-200 bg-white rounded-xl py-3 text-sm font-semibold text-gray-700"><span className="retro-ms-grid" aria-hidden="true"><i/><i/><i/><i/></span> Microsoft</button>
-        </div>
+        <button type="button" disabled={loading} onClick={socialLogin} className="retro-social w-full border border-gray-200 bg-white rounded-xl py-3 text-sm font-semibold text-gray-700 flex items-center justify-center gap-2 disabled:opacity-60">
+          <span className="retro-google-g" aria-hidden="true">G</span> Continuar con Google
+        </button>
         <button onClick={() => { setMode("forgot"); setErr(""); setEmail(""); }}
           className="w-full text-center text-xs text-green-700 mt-3 hover:underline font-medium py-1">
           ¿Olvidaste tu contraseña?
