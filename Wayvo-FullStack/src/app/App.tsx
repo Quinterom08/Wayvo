@@ -560,8 +560,9 @@ function AuthScreen({onLogin, socialChallenge}: {onLogin: (u: AppUser) => void; 
 
 // ─── MAP SCREEN ───────────────────────────────────────────────────────────────
 
-function MapScreen({activeRoute, onRouteChange, onBack, isAdmin}: {
+function MapScreen({activeRoute, trip, onRouteChange, onBack, isAdmin}: {
   isAdmin:boolean;
+  trip: FastTripResult|null;
   activeRoute: string|null;
   onRouteChange: (id: string|null) => void;
   onBack: () => void;
@@ -572,8 +573,13 @@ function MapScreen({activeRoute, onRouteChange, onBack, isAdmin}: {
       <div className="flex-1 min-w-0"><strong>Mapa de Wayvo</strong><small>Medellín · recorridos de demostración</small></div>
       <Map size={19} aria-hidden="true"/>
     </div>
+    {trip?.found && <div className="wayvo-map-itinerary" aria-label="Resumen del recorrido seleccionado">
+      <strong><Navigation2 size={15}/> {trip.segments?.map(x=>x.bus).join(' → ')}</strong>
+      <span>{trip.origin} → {trip.destination} · {trip.transfers||0} transbordos</span>
+      <small>El GPS señalará el paradero estimado más próximo del primer tramo. Rutas ficticias.</small>
+    </div>}
     <div className="flex-1 relative min-h-0">
-      <WayvoLeafletMap activeRoute={activeRoute} onRouteSelect={onRouteChange} isAdmin={isAdmin}
+      <WayvoLeafletMap activeRoute={activeRoute} trip={trip?.found?trip:null} onRouteSelect={onRouteChange} isAdmin={isAdmin}
           onLoadBuses={async ()=> (await api<{buses:LiveBus[]}>('/gps/buses')).buses}
           onSaveTrack={async (points:GpsPoint[])=>{await api("/gps/tracks",{method:"POST",body:JSON.stringify({points})});}}
           onLoadTracks={async ()=>{const result=await api<{tracks:{id:number;created_at:string;points:GpsPoint[]}[]}>("/gps/tracks");return result.tracks;}}
@@ -597,7 +603,7 @@ function MapScreen({activeRoute, onRouteChange, onBack, isAdmin}: {
 
 // ─── HOME SCREEN ──────────────────────────────────────────────────────────────
 
-type ChatMessage = {role:"user"|"assistant"; content:string};
+type ChatMessage = {role:"user"|"assistant"; content:string; trip?:FastTripResult|null};
 const CHAT_WELCOME:ChatMessage = {role:"assistant",content:"¡Hola! Soy Wayvo IA 🚌💚. ¿Qué te gustaría saber hoy? Puedo ayudarte con rutas de demostración, paraderos, tarifas o simplemente conversar."};
 const CHAT_SUGGESTIONS=["¿Cómo llego de Bello a Envigado?","¿Cuánto cuesta el pasaje?","¿Qué rutas tienes?","¿Qué es Wayvo?"];
 // El acceso rápido consulta el mismo catálogo ficticio que utiliza Wayvo IA.
@@ -665,7 +671,7 @@ function ExpressTripPlanner({onResult}: {onResult: (trip:FastTripResult|null) =>
     <div className="wayvo-express-card">
       <button type="button" className="wayvo-express-heading w-full flex items-center gap-2 px-3 py-2.5 text-left" onClick={()=>setExpanded(v=>!v)} aria-expanded={expanded} aria-controls="express-route-content">
         <span className="wayvo-express-mark"><Bus size={19}/></span>
-        <span className="flex-1 min-w-0"><strong className="block text-sm tracking-tight">RUTA EXPRESS <span className="wayvo-version-pill">v1.1</span></strong><small className="block text-[10px] font-semibold opacity-80">Encuentra tu bus sin escribir en el chat</small></span>
+        <span className="flex-1 min-w-0"><strong className="block text-sm tracking-tight">RUTA EXPRESS <span className="wayvo-version-pill">v1.3</span></strong><small className="block text-[10px] font-semibold opacity-80">Encuentra tu bus sin escribir en el chat</small></span>
         <ChevronDown size={17} className={`transition-transform ${expanded?'rotate-180':''}`}/>
       </button>
       {expanded&&<div id="express-route-content" className="px-3 pb-3 pt-2">
@@ -699,7 +705,7 @@ function ExpressTripPlanner({onResult}: {onResult: (trip:FastTripResult|null) =>
   </section>;
 }
 
-function ExpressTripSummary({result,onAskInChat}: {result:FastTripResult; onAskInChat:(origin:string,destination:string)=>void}) {
+function ExpressTripSummary({result,onAskInChat,onViewMap}: {result:FastTripResult; onAskInChat:(origin:string,destination:string)=>void;onViewMap:(trip:FastTripResult)=>void}) {
   return <div role="status" className="wayvo-express-result mb-4" aria-live="polite">
           {!result.found?<p className="text-xs font-semibold text-[#455949] py-2">{result.message}</p>:<>
             <div className="flex items-center justify-between gap-2 mb-2">
@@ -720,22 +726,29 @@ function ExpressTripSummary({result,onAskInChat}: {result:FastTripResult; onAskI
               </li>)}
             </ol>
             <p className="text-[10px] text-[#657a65] leading-snug mt-2">{result.disclaimer}</p>
-            <button type="button" onClick={()=>{onAskInChat(result.origin??'',result.destination??'');}} className="wayvo-express-ask mt-2 text-xs font-extrabold flex items-center gap-1.5">Consultar detalles en el chat <ArrowRight size={13}/></button>
+            <button type="button" onClick={()=>onViewMap(result)} className="wayvo-trip-map-button mt-3" aria-label="Ver este recorrido y mi GPS en el mapa"><Map size={17}/> Ver recorrido y mi GPS <ArrowRight size={16}/></button>
+            <button type="button" onClick={()=>{onAskInChat(result.origin??'',result.destination??'');}} className="wayvo-express-ask mt-3 text-xs font-extrabold flex items-center gap-1.5">Consultar detalles en el chat <ArrowRight size={13}/></button>
           </>}
 </div>;
 }
 
-function AssistantScreen({onBack}: {onBack: () => void}) {
+function AssistantScreen({onBack,onViewMap}: {onBack: () => void;onViewMap:(trip:FastTripResult)=>void}) {
   const [messages,setMessages]=useState<ChatMessage[]>(()=>{
     try {const saved=JSON.parse(sessionStorage.getItem('wayvo_chat')||'null');
       if(Array.isArray(saved) && saved.length>0 && saved.length<=50 && saved.every((m:any)=>m && ['user','assistant'].includes(m.role) && typeof m.content==='string'))return saved;
     }catch(_){} return [CHAT_WELCOME];
   });
   const [draft,setDraft]=useState('');
-  const [fastTrip,setFastTrip]=useState<FastTripResult|null>(null);
+  const [fastTrip,setFastTrip]=useState<FastTripResult|null>(()=>{
+    try {const saved=JSON.parse(sessionStorage.getItem('wayvo_express_trip')||'null');return saved?.found&&Array.isArray(saved.segments)?saved:null;}
+    catch{return null;}
+  });
+  useEffect(()=>{if(fastTrip)sessionStorage.setItem('wayvo_express_trip',JSON.stringify(fastTrip));else sessionStorage.removeItem('wayvo_express_trip');},[fastTrip]);
   const chatScroller=useRef<HTMLDivElement>(null);
   const [location,setLocation]=useState<{latitude:number;longitude:number}|undefined>();
   const [loading,setLoading]=useState(false);
+  const [locatingGps,setLocatingGps]=useState(false);
+  const [lastFailed,setLastFailed]=useState<string|null>(null);
   const [error,setError]=useState('');
   const lastChatMessage=useRef(messages);
   useEffect(()=>{if(fastTrip)chatScroller.current?.scrollTo({top:0,behavior:'smooth'});},[fastTrip]);
@@ -748,25 +761,28 @@ function AssistantScreen({onBack}: {onBack: () => void}) {
     const panel=chatScroller.current;
     if(panel)panel.scrollTo({top:panel.scrollHeight,behavior:'smooth'});
   },[messages]);
-  const send=async (proposal?:string, overrideLocation?:{latitude:number;longitude:number})=>{
+  const send=async (proposal?:string, overrideLocation?:{latitude:number;longitude:number}, retry=false)=>{
     const text=(proposal??draft).trim();
     if(!text||loading)return;
-    const outgoing=[...messages.filter(m=>m.content!==CHAT_WELCOME.content),{role:'user' as const,content:text}].slice(-20);
-    setMessages(prev=>[...prev,{role:'user' as const,content:text}]);setDraft('');setError('');setLoading(true);
+    const outgoing=[...messages.filter(m=>m.content!==CHAT_WELCOME.content),...(retry?[]:[{role:'user' as const,content:text}])].slice(-20);
+    if(!retry)setMessages(prev=>[...prev,{role:'user' as const,content:text}]);
+    setDraft('');setError('');setLastFailed(null);setLoading(true);
     try {
-      const result=await api<{answer:string;source:string}>("/assistant/chat",{method:"POST",body:JSON.stringify({messages:outgoing,location:overrideLocation??location})});
-      setMessages(prev=>[...prev,{role:'assistant' as const,content:result.answer}]);
-    }catch(e){setError(e instanceof Error?e.message:'No se pudo conectar con Wayvo IA.');}
+      const result=await api<{answer:string;source:string;trip?:FastTripResult}>("/assistant/chat",{method:"POST",body:JSON.stringify({messages:outgoing,location:overrideLocation??location})});
+      // Never echo the exact question as a preamble to the answer.
+      const answer=result.answer.trim().startsWith(text)?result.answer.trim().slice(text.length).replace(/^[\s:—-]+/,''):result.answer;
+      setMessages(prev=>[...prev,{role:'assistant' as const,content:answer||result.answer,trip:result.trip?.found?result.trip:null}]);
+    }catch(e){setError(e instanceof Error?e.message:'No se pudo conectar con Wayvo IA.');setLastFailed(text);}
     finally{setLoading(false);}
   };
   const useLocation=()=>{
-    setError('');
+    setError('');setLocatingGps(true);
     if(!navigator.geolocation){setError('El dispositivo no dispone de GPS.');return;}
     navigator.geolocation.getCurrentPosition(p=>{
       const coords={latitude:p.coords.latitude,longitude:p.coords.longitude};
-      setLocation(coords);
+      setLocation(coords);setLocatingGps(false);
       void send('¿Dónde estoy? Comparto mi ubicación GPS.',coords);
-    },()=>setError('No se pudo acceder al GPS. Revisa los permisos y activa la ubicación.'),{enableHighAccuracy:true,timeout:12000});
+    },()=>{setLocatingGps(false);setError('No se pudo acceder al GPS. Revisa los permisos o selecciona el origen manualmente en Ruta Express.');},{enableHighAccuracy:true,timeout:12000});
   };
   return <div className="wayvo-chat-screen flex-1 flex flex-col min-h-0 bg-[#f0f2e8]">
     <div className="shrink-0 bg-[#1b4935] text-[#fffdf1] px-4 pt-4 pb-4 border-b-4 border-[#e6d681] flex items-center gap-3">
@@ -777,23 +793,26 @@ function AssistantScreen({onBack}: {onBack: () => void}) {
     </div>
     <div ref={chatScroller} className="wayvo-chat-scroll flex-1 min-h-0 overflow-y-auto px-3 py-4 space-y-4" aria-live="polite" aria-label="Ruta Express y mensajes de Wayvo IA">
       <ExpressTripPlanner onResult={setFastTrip}/>
-      {fastTrip&&<ExpressTripSummary result={fastTrip} onAskInChat={(start,end)=>{void send(`¿Cómo llego de ${start} a ${end}?`);}}/>}
+      {fastTrip&&<ExpressTripSummary result={fastTrip} onViewMap={onViewMap} onAskInChat={(start,end)=>{void send(`¿Cómo llego de ${start} a ${end}?`);}}/>}
       <div className="flex justify-center"><span className="rounded-full text-[10px] font-black tracking-wide px-3 py-1 border border-[#acc3a2] bg-[#e1ebd5] text-[#2a5b40]">DEMOSTRACIÓN ACADÉMICA</span></div>
       {messages.map((m,i)=><div key={i} className={`flex ${m.role==='user'?'justify-end':'justify-start'}`}>
         {m.role==='assistant'&&<div className="w-7 h-7 bg-[#e6d681] border border-[#1b4935] rounded-lg mr-2 flex items-center justify-center shrink-0"><Bot size={16} className="text-[#1b4935]"/></div>}
-        <div className={`wayvo-chat-bubble ${m.role==='user'?'wayvo-chat-user':'wayvo-chat-assistant'}`}>{m.content}</div>
+        <div className="min-w-0 max-w-[83%]">
+          <div className={`wayvo-chat-bubble !max-w-full ${m.role==='user'?'wayvo-chat-user':'wayvo-chat-assistant'}`}>{m.content}</div>
+          {m.role==='assistant'&&m.trip?.found&&<button type="button" onClick={()=>onViewMap(m.trip!)} className="wayvo-trip-map-button mt-2" aria-label="Abrir ruta recomendada en el mapa"><Map size={15}/> Ver ruta y paradero en el mapa <ArrowRight size={15}/></button>}
+        </div>
       </div>)}
-      {loading&&<div className="flex items-center gap-2 text-[#43664d] text-xs"><Loader2 size={17} className="animate-spin"/> Wayvo está escribiendo...</div>}
+      {loading&&<div role="status" className="wayvo-search-status flex items-center gap-2 text-[#28533d] text-xs"><Loader2 size={17} className="animate-spin"/> Analizando tu consulta y buscando opciones…</div>}
       {messages.length===1&&<div className="pt-3"><p className="font-extrabold text-[#38614a] text-xs mb-3">PRUEBA CON UNA PREGUNTA</p><div className="grid grid-cols-1 gap-2">{CHAT_SUGGESTIONS.map(q=><button key={q} type="button" onClick={()=>void send(q)} className="wayvo-chat-suggestion text-left text-xs font-semibold px-4 py-3 rounded-xl">{q} <ArrowRight size={13} className="inline ml-1"/></button>)}</div></div>}
     </div>
-    {error&&<p role="alert" className="px-4 py-2 text-xs font-semibold bg-red-50 text-red-700 border-t border-red-100">{error}</p>}
+    {error&&<div role="alert" className="px-4 py-2 text-xs font-semibold bg-red-50 text-red-700 border-t border-red-100 flex flex-wrap items-center justify-between gap-2"><span>{error}</span>{lastFailed&&<button type="button" onClick={()=>void send(lastFailed,undefined,true)} disabled={loading} className="underline font-bold">Reintentar respuesta</button>}</div>}
     <form onSubmit={e=>{e.preventDefault();void send();}} className="shrink-0 px-3 pt-3 pb-2 bg-[#fffdf1] border-t-2 border-[#b6c8ab]">
       <div className="flex items-end gap-2">
-        <button type="button" onClick={useLocation} title="Compartir mi ubicación GPS" aria-label="Compartir mi ubicación GPS" disabled={loading} className="wayvo-chat-icon-button"><LocateFixed size={20}/></button>
+        <button type="button" onClick={useLocation} title="Compartir mi ubicación GPS" aria-label="Compartir mi ubicación GPS" disabled={loading||locatingGps} className="wayvo-chat-icon-button">{locatingGps?<Loader2 size={20} className="animate-spin"/>:<LocateFixed size={20}/>}</button>
         <textarea aria-label="Escribe tu mensaje" value={draft} onChange={e=>setDraft(e.target.value)} maxLength={700} rows={1} placeholder="Pregúntame lo que quieras..." onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();void send();}}} className="wayvo-chat-input flex-1 resize-none max-h-28 min-h-[43px] py-3 px-3 text-sm rounded-xl outline-none"/>
         <button type="submit" disabled={loading||!draft.trim()} aria-label="Enviar mensaje" className="wayvo-chat-send h-11 w-11 rounded-xl text-[#fffdf1] flex items-center justify-center disabled:opacity-50"><Send size={18}/></button>
       </div>
-      <p className="text-center text-[10px] text-[#66806c] mt-2">Rutas ficticias · El GPS no identifica paraderos sin geocodificación</p>
+      <p className="text-center text-[10px] text-[#66806c] mt-2">{locatingGps?"Buscando tu ubicación GPS…":"Rutas y paraderos ficticios. Si falla el GPS, selecciona un origen manual."}</p>
     </form>
   </div>;
 }
@@ -813,7 +832,7 @@ function HomeScreen({user, unread, onNavigate}: {
   return <div className="wayvo-home flex-1 min-h-0 overflow-y-auto">
     <header className="wayvo-inline-brand" aria-label="Wayvo, tu ciudad en movimiento">
       <div className="wayvo-banner-mark">W<span>↗</span></div>
-      <div className="flex-1"><strong>WAYVO</strong><small>LA CIUDAD ES TUYA · V1.2</small></div>
+      <div className="flex-1"><strong>WAYVO</strong><small>LA CIUDAD ES TUYA · V1.3 EXPO</small></div>
       <span className="wayvo-banner-route" aria-hidden="true">● ─ ─ ●</span>
     </header>
     <div className="px-4 pt-4 pb-3 flex items-center justify-between">
@@ -1301,66 +1320,32 @@ function NotificationsScreen({notifications, onBack, onMarkRead}: {
 function ProfileScreen({user, onNavigate, onLogout, onBack}: {
   user: AppUser; onNavigate: (s: Screen) => void; onLogout: () => void; onBack: () => void;
 }) {
-  const menuItems: {icon: React.FC<{className?:string;strokeWidth?:number}>; label:string; desc:string; action:()=>void}[] = [
-    {icon:Bookmark, label:"Mis favoritos",  desc:"2 rutas guardadas",  action:()=>onNavigate("favorites")},
-    {icon:Bell,     label:"Notificaciones", desc:"Configurar alertas", action:()=>onNavigate("notifications")},
-    {icon:Wallet,   label:"Tarifas",        desc:"Consultar precios",  action:()=>onNavigate("fares")},
-    {icon:Bus,      label:"Vehículos",      desc:"Estado de la flota", action:()=>onNavigate("vehicles")},
-    {icon:Settings, label:"Configuración",  desc:"Ajustes de la app",  action:()=>onNavigate("settings")},
+  const menuItems = [
+    {icon:Bookmark, label:"Mis favoritos", desc:"Consulta tus líneas guardadas", action:()=>onNavigate("favorites")},
+    {icon:Bell, label:"Notificaciones", desc:"Consulta los avisos de Wayvo", action:()=>onNavigate("notifications")},
+    {icon:Wallet, label:"Tarifas", desc:"Valores académicos de demostración", action:()=>onNavigate("fares")},
+    {icon:Bus, label:"Vehículos", desc:"Consulta buses y recorridos", action:()=>onNavigate("vehicles")},
+    {icon:Settings, label:"Configuración", desc:"Preferencias de la aplicación", action:()=>onNavigate("settings")},
   ];
-  return (
-    <div className="flex-1 overflow-y-auto bg-gray-50">
-      <div className="wayvo-profile-return px-4 pt-3"><button type="button" onClick={onBack} className="wayvo-back-link"><ChevronLeft size={17}/> Volver a inicio</button></div>
-      <div className="bg-green-700 px-4 pt-8 pb-12">
-        <div className="flex items-center gap-4">
-          <div className="w-16 h-16 rounded-2xl bg-white/20 flex items-center justify-center text-3xl flex-shrink-0">
-            {user.isAdmin ? "🛡️" : "👤"}
-          </div>
-          <div>
-            <h2 className="text-lg font-bold text-white">{user.name}</h2>
-            <p className="text-white/60 text-sm">{user.email}</p>
-            <span className="text-[11px] bg-white/20 text-white px-2.5 py-0.5 rounded-full font-semibold mt-1.5 inline-block">
-              {user.isAdmin ? "Trabajador" : "Cliente"}
-            </span>
-          </div>
+  return <div className="wayvo-profile flex-1 min-h-0 overflow-y-auto">
+    <div className="wayvo-page-header"><button type="button" className="wayvo-back-button" onClick={onBack} aria-label="Volver al inicio"><ChevronLeft size={19}/></button><div className="flex-1"><strong>Mi Perfil</strong><small>Tu cuenta, a tu manera</small></div><User size={20}/></div>
+    <div className="px-4 pt-5 pb-8 space-y-5">
+      <section className="wayvo-profile-ticket" aria-label="Datos de mi cuenta">
+        <div className="flex items-start gap-3 min-w-0">
+          <div className="wayvo-profile-avatar"><User size={29}/></div>
+          <div className="min-w-0 flex-1"><span className="text-[10px] uppercase font-black tracking-[.16em] text-[#5f795c]">Viajero Wayvo</span><h1 className="!text-[#1b4935] text-xl !font-black leading-tight break-words">{user.name}</h1><p className="text-[#526b57] text-xs break-all mt-1">{user.email}</p></div>
         </div>
-      </div>
-      <div className="px-4 -mt-6 mb-5">
-        <Card className="grid grid-cols-3 divide-x divide-gray-100">
-          {[{n:"2",l:"Favoritos"},{n:"14",l:"Viajes"},{n:"5",l:"Rutas"}].map(s => (
-            <div key={s.l} className="py-3.5 text-center">
-              <p className="text-xl font-bold text-gray-900">{s.n}</p>
-              <p className="text-xs text-gray-400">{s.l}</p>
-            </div>
-          ))}
-        </Card>
-      </div>
-      <div className="px-4 mb-4">
-        <SectionLabel>Mi cuenta</SectionLabel>
-        <div className="space-y-2">
-          {menuItems.map(item => (
-            <button key={item.label} onClick={item.action}
-              className="w-full flex items-center gap-3 px-4 py-3.5 bg-white border border-gray-100 rounded-2xl shadow-sm hover:shadow-md transition-shadow text-left">
-              <div className="w-9 h-9 rounded-xl bg-gray-50 border border-gray-100 flex items-center justify-center flex-shrink-0">
-                <item.icon className="w-5 h-5 text-gray-500" strokeWidth={1.5}/>
-              </div>
-              <div className="flex-1">
-                <p className="text-sm font-semibold text-gray-900">{item.label}</p>
-                <p className="text-xs text-gray-400">{item.desc}</p>
-              </div>
-              <ChevronRight className="w-4 h-4 text-gray-300"/>
-            </button>
-          ))}
-        </div>
-      </div>
-      
-      <div className="px-4 pb-6">
-        <button onClick={onLogout} className="w-full flex items-center justify-center gap-2 py-3.5 border-2 border-red-200 text-red-500 rounded-2xl text-sm font-bold hover:bg-red-50 transition-colors">
-          <LogOut className="w-4 h-4"/>Cerrar sesión
-        </button>
-      </div>
+        <div className="mt-4 border-t-2 border-dashed border-[#acbea6] pt-3 flex gap-2 flex-wrap"><span className="wayvo-profile-tag"><CheckCircle size={14}/> Cuenta activa</span><span className="wayvo-profile-tag"><Shield size={14}/> {user.isAdmin?'Administrador':'Pasajero'}</span></div>
+        <p className="text-[10px] text-[#667d67] mt-3">WAYVO · TU CIUDAD, TU RUTA · DEMOSTRACIÓN ACADÉMICA</p>
+      </section>
+      <section aria-label="Opciones de mi perfil"><SectionLabel>Mi cuenta</SectionLabel><div className="space-y-3 mt-3">
+        {menuItems.map(item=><button type="button" key={item.label} onClick={item.action} className="wayvo-profile-action w-full flex items-center gap-3 p-3.5 text-left">
+          <span className="wayvo-profile-action-icon"><item.icon size={20}/></span><span className="flex-1 min-w-0"><strong className="block text-[#204a36] text-sm">{item.label}</strong><small className="text-[#667e69] text-xs">{item.desc}</small></span><ChevronRight size={18} className="text-[#45644e] shrink-0"/>
+        </button>)}
+      </div></section>
+      <button type="button" onClick={onLogout} className="wayvo-profile-logout w-full flex items-center justify-center gap-2 p-3.5 text-sm font-extrabold"><LogOut size={18}/> Cerrar sesión</button>
     </div>
-  );
+  </div>;
 }
 
 // ─── ADMIN SCREEN ─────────────────────────────────────────────────────────────
@@ -1626,6 +1611,8 @@ export default function App() {
   const [screenStack, setScreenStack] = useState<Screen[]>([]);
   const [selectedRoute, setSelectedRoute] = useState<BusRoute|null>(null);
   const [activeMapRoute, setActiveMapRoute] = useState<string|null>(null);
+  const [mapTrip,setMapTrip]=useState<FastTripResult|null>(null);
+  const [mapReturnTo,setMapReturnTo]=useState<TabId>('home');
   const [notifications, setNotifications] = useState<AppNotif[]>(NOTIFS_DATA);
 
   const unread = notifications.filter(n => !n.leida).length;
@@ -1652,7 +1639,8 @@ export default function App() {
 
   const markRead = (id: number) => setNotifications(prev => prev.map(n => n.id===id ? {...n,leida:true} : n));
 
-  const goToMap = (routeId: string) => { setActiveMapRoute(routeId); switchTab("map"); };
+  const goToMap = (routeId: string) => { setMapReturnTo('home');setMapTrip(null); setActiveMapRoute(routeId); switchTab("map"); };
+  const goToTripMap = (trip:FastTripResult) => {if(!trip.found || !trip.segments?.length)return;setMapReturnTo('assistant');setMapTrip(trip);setActiveMapRoute(null);switchTab("map");};
   const goToRouteDetail = (r: BusRoute) => { setSelectedRoute(r); navigate("route-detail"); };
 
   if (checkingSession) return <div className="h-screen flex items-center justify-center">Cargando sesión...</div>;
@@ -1660,20 +1648,21 @@ export default function App() {
 
   const renderScreen = () => {
     switch (screen) {
-      case "assistant": return <AssistantScreen onBack={()=>screenStack.length?goBack():switchTab("home")}/>;
+      case "assistant": return <AssistantScreen onBack={()=>screenStack.length?goBack():switchTab("home")} onViewMap={goToTripMap}/>;
       case "notifications": return <NotificationsScreen notifications={notifications} onBack={goBack} onMarkRead={markRead}/>;
       case "fares":         return <FaresScreen onBack={goBack}/>;
       case "vehicles":      return <VehiclesScreen onBack={goBack} onViewMap={goToMap}/>;
       case "admin":         return user.isAdmin ? <AdminScreen onBack={()=>screenStack.length?goBack():switchTab("home")}/> : null;
       case "favorites":     return <FavoritesScreen onBack={goBack} onViewRoute={goToRouteDetail} onViewMap={goToMap}/>;
       case "settings":      return <SettingsScreen onBack={goBack}/>;
-      case "map":           return <MapScreen activeRoute={activeMapRoute} onRouteChange={setActiveMapRoute} isAdmin={user.isAdmin} onBack={()=>switchTab("home")}/>;
-      case "trips":         return <AssistantScreen onBack={goBack}/>;
+      case "map":           return <MapScreen activeRoute={activeMapRoute} trip={mapTrip} onRouteChange={id=>{setMapTrip(null);setActiveMapRoute(id);}} isAdmin={user.isAdmin} onBack={()=>switchTab(mapReturnTo)}/>;
+      case "trips":         return <AssistantScreen onBack={goBack} onViewMap={goToTripMap}/>;
       case "route-detail":  return <RoutesScreen selected={selectedRoute} onSelect={r=>setSelectedRoute(r)} onBack={goBack} onViewMap={goToMap}/>;
       case "routes":        return <RoutesScreen selected={null} onSelect={r=>{setSelectedRoute(r);navigate("route-detail");}} onBack={goBack} onViewMap={goToMap}/>;
       case "profile":       return <ProfileScreen user={user} onBack={()=>switchTab("home")} onNavigate={navigate} onLogout={()=>{ api("/auth/logout",{method:"POST"}).catch(()=>{}); clearSession(); setUser(null); }}/>;
       default:              return <HomeScreen user={user} unread={unread}
           onNavigate={dest=>{
+            if(dest==="map"){setMapReturnTo('home');setMapTrip(null);setActiveMapRoute(null);}
             const tabs=["home","assistant","routes","map","trips","profile","admin"];
             if(tabs.includes(dest)) switchTab(dest as TabId); else navigate(dest as Screen);
           }}/>;

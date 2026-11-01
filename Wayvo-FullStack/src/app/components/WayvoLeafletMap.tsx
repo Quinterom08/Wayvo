@@ -18,6 +18,22 @@ export const DEMO_PATHS: {
   { id: '301', color: '#DC2626', name: 'Circular Norte', points: [[6.282, -75.563], [6.291, -75.556], [6.300, -75.562], [6.301, -75.578], [6.286, -75.580], [6.282, -75.563]] },
 ];
 
+// Coordenadas aproximadas de los paraderos FICTICIOS del motor de rutas.
+// Mantener coherencia entre los nombres de backend/assistant_chat.py y este mapa.
+export const DEMO_STOP_COORDS: Record<string, L.LatLngTuple> = {
+  'Bello':[6.334,-75.558], 'Niquía':[6.317,-75.558], 'Madera':[6.300,-75.560],
+  'Acevedo':[6.283,-75.564], 'Universidad':[6.265,-75.568], 'Centro':[6.246,-75.570],
+  'El Poblado':[6.222,-75.573], 'Envigado':[6.174,-75.591],
+  'Laureles':[6.245,-75.603], 'Estadio':[6.250,-75.593], 'Suramericana':[6.251,-75.585],
+  'Belén':[6.223,-75.601], 'La América':[6.236,-75.608], 'Floresta':[6.269,-75.591],
+  'Robledo':[6.282,-75.595], 'Sabaneta':[6.176,-75.597], 'Itagüí':[6.168,-75.614],
+  'Aranjuez':[6.282,-75.563], 'Manrique':[6.291,-75.556], 'Santa Cruz':[6.300,-75.562],
+};
+export type MapTrip = {
+  found: boolean; origin?:string; destination?:string;
+  segments?: {bus:string;board_at:string;get_off_at:string;stops:string[]}[];
+};
+
 export type GpsPoint = { lat: number; lng: number; time: number };
 export type LiveBus = { id:number; label:string; route_id:string; active:boolean; updated_at:string; lat:number; lng:number; accuracy:number|null; trail:{lat:number;lng:number}[] };
 const MEDELLIN: L.LatLngTuple = [6.2486, -75.5742];
@@ -27,6 +43,7 @@ const TILE_URL = (import.meta.env.VITE_OSM_TILE_URL || DEFAULT_TILE_URL).trim();
 
 interface Props {
   activeRoute?: string | null;
+  trip?: MapTrip | null;
   compact?: boolean;
   onRouteSelect?: (id: string | null) => void;
   onOpenMap?: () => void;
@@ -37,11 +54,12 @@ interface Props {
   isAdmin?: boolean;
 }
 
-export function WayvoLeafletMap({ activeRoute = null, compact = false, onRouteSelect, onOpenMap, onSaveTrack, onLoadTracks, onDeleteTrack, onLoadBuses, isAdmin = false }: Props) {
+export function WayvoLeafletMap({ activeRoute = null, trip = null, compact = false, onRouteSelect, onOpenMap, onSaveTrack, onLoadTracks, onDeleteTrack, onLoadBuses, isAdmin = false }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
   const linesRef = useRef<Map<string, L.Polyline>>(new Map());
   const locationRef = useRef<L.LayerGroup | null>(null);
+  const journeyRef = useRef<L.LayerGroup | null>(null);
   const trackLineRef = useRef<L.Polyline | null>(null);
   const watchIdRef = useRef<number | null>(null);
   const locationWatchIdRef = useRef<number | null>(null);
@@ -67,6 +85,7 @@ export function WayvoLeafletMap({ activeRoute = null, compact = false, onRouteSe
   const [locating, setLocating] = useState(false);
   const [error, setError] = useState('');
   const [gpsPosition, setGpsPosition] = useState<L.LatLngTuple | null>(null);
+  const [nearestStop,setNearestStop] = useState<{name:string;meters:number}|null>(null);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -84,6 +103,7 @@ export function WayvoLeafletMap({ activeRoute = null, compact = false, onRouteSe
     });
     mapRef.current = map;
     busLayerRef.current = L.layerGroup().addTo(map);
+    journeyRef.current = L.layerGroup().addTo(map);
     if (!compact) L.control.zoom({ position: 'bottomright' }).addTo(map);
     if (compact) map.on('click', () => onOpenRef.current?.());
 
@@ -142,6 +162,7 @@ export function WayvoLeafletMap({ activeRoute = null, compact = false, onRouteSe
       busLayerRef.current = null;
       trackLineRef.current = null;
       locationRef.current = null;
+      journeyRef.current = null;
       linesRef.current.clear();
       mapRef.current = null;
       map.remove();
@@ -152,16 +173,70 @@ export function WayvoLeafletMap({ activeRoute = null, compact = false, onRouteSe
     const map = mapRef.current;
     if (!map) return;
     linesRef.current.forEach((line, routeId) => {
-      const selected = activeRoute === routeId;
+      const inTrip=trip?.segments?.some(leg=>leg.bus===`WV-${routeId}`) ?? false;
+      const selected = activeRoute === routeId || inTrip;
       line.setStyle({
-        opacity: activeRoute && !selected ? .18 : 0.88,
+        opacity: (activeRoute || trip?.found) && !selected ? .12 : 0.88,
         weight: selected ? 7 : 4,
       });
       if (selected) line.bringToFront();
     });
     const chosen = activeRoute ? linesRef.current.get(activeRoute) : undefined;
     if (chosen) map.fitBounds(chosen.getBounds().pad(.26), { animate: true, maxZoom: 14 });
-  }, [activeRoute, compact]);
+  }, [activeRoute, compact, trip]);
+
+  // Itinerary preview: highlight every bus and its boarding/alighting markers.
+  // We never claim these approximate lines are turn-by-turn street directions.
+  useEffect(()=>{
+    const map=mapRef.current, group=journeyRef.current;
+    if(!map || !group) return;
+    group.clearLayers();setNearestStop(null);
+    if(!trip?.found || !trip.segments?.length) return;
+    const bounds:L.LatLngTuple[]=[];
+    trip.segments.forEach((leg,index)=>{
+      const routeId=leg.bus.replace(/^WV-/, '');
+      const full=DEMO_PATHS.find(route=>route.id===routeId);
+      if(full){bounds.push(...full.points);}
+      const from=DEMO_STOP_COORDS[leg.board_at];
+      const to=DEMO_STOP_COORDS[leg.get_off_at];
+      if(from){bounds.push(from);
+        L.circleMarker(from,{radius:10,color:'#fffdf1',weight:3,fillColor:index?'#e6d681':'#1b4935',fillOpacity:1})
+          .bindTooltip(index?`Transbordo: ${leg.bus} · ${leg.board_at}`:`Sube a ${leg.bus} en ${leg.board_at}`)
+          .addTo(group);
+      }
+      if(to){bounds.push(to);
+        L.circleMarker(to,{radius:8,color:'#fffdf1',weight:3,fillColor:'#b96032',fillOpacity:1})
+          .bindTooltip(`Baja de ${leg.bus} en ${leg.get_off_at}`).addTo(group);
+      }
+    });
+    if(bounds.length)map.fitBounds(L.latLngBounds(bounds).pad(.13),{maxZoom:14,animate:false});
+  },[trip,compact]);
+
+  // Find the nearest ESTIMATED stop from the first leg using the user's real GPS.
+  // The dotted connection is straight-line distance, not a walking route.
+  useEffect(()=>{
+    const group=journeyRef.current, map=mapRef.current;
+    if(!group || !map || !trip?.found || !trip.segments?.length || !gpsPosition){setNearestStop(null);return;}
+    const startLeg=trip.segments[0];
+    const options=startLeg.stops.slice(0,-1).map(name=>({name,point:DEMO_STOP_COORDS[name]})).filter((o):o is {name:string;point:L.LatLngTuple}=>!!o.point);
+    if(!options.length)return;
+    const ranked=options.map(o=>({...o,meters:map.distance(gpsPosition,o.point)})).sort((a,b)=>a.meters-b.meters);
+    const nearest=ranked[0];
+    setNearestStop({name:nearest.name,meters:nearest.meters});
+    const line=L.polyline([gpsPosition,nearest.point],{color:'#1b4935',weight:3,opacity:.9,dashArray:'4 9',interactive:false}).addTo(group);
+    const marker=L.circleMarker(nearest.point,{radius:11,color:'#1b4935',weight:3,fillColor:'#e6d681',fillOpacity:1})
+      .bindTooltip(`Paradero estimado más cercano: ${nearest.name}`)
+      .addTo(group);
+    return ()=>{group.removeLayer(line);group.removeLayer(marker);};
+  },[trip,gpsPosition]);
+
+  // GPS activation is requested only after the person explicitly pressed
+  // “Ver recorrido y mi GPS” in Ruta Express/the chat.
+  useEffect(()=>{
+    if(trip?.found && !compact && mapRef.current)locate();
+    // locate is intentionally not a dependency: its state callback changes per render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[trip,compact]);
 
   // GPS locations come from the server (in-bus devices). The passenger's own
   // geolocation is only used by the separate Locate button, never sent as bus telemetry.
@@ -215,7 +290,13 @@ export function WayvoLeafletMap({ activeRoute = null, compact = false, onRouteSe
         .bindPopup(`Tu ubicación aproximada · ±${Math.round(position.coords.accuracy||0)} m`);
       locationRef.current=L.layerGroup([accuracyCircle,marker]).addTo(map);
       // On first fix center, then let the user explore without jumping the map.
-      if(firstGpsFixRef.current){firstGpsFixRef.current=false;map.setView(point,compact?13:15,{animate:true});}
+      if(firstGpsFixRef.current){
+        firstGpsFixRef.current=false;
+        if(trip?.found && trip.segments?.length){
+          const path=trip.segments.flatMap(leg=>DEMO_PATHS.find(r=>r.id===leg.bus.replace(/^WV-/,''))?.points||[]);
+          map.fitBounds(L.latLngBounds([point,...path]).pad(.12),{maxZoom:14,animate:true});
+        }else map.setView(point,compact?13:15,{animate:true});
+      }
     },(cause)=>{
       setLocating(false);
       if(locationWatchIdRef.current!==null)navigator.geolocation.clearWatch(locationWatchIdRef.current);
@@ -322,7 +403,7 @@ export function WayvoLeafletMap({ activeRoute = null, compact = false, onRouteSe
         <LocateFixed size={19} className={locating ? 'animate-pulse' : ''} />
         {compact && <span className="text-[10px] font-black">Mi GPS</span>}
       </button>
-      {!compact && isAdmin && <div className="absolute z-[500] top-16 left-2 right-2 pointer-events-none flex flex-col items-start gap-1">
+      {!compact && isAdmin && !trip?.found && <div className="absolute z-[500] top-16 left-2 right-2 pointer-events-none flex flex-col items-start gap-1">
         <div className="rounded-xl bg-[#fffdf1]/95 border border-[#74917b] shadow-md p-2 pointer-events-auto max-w-full">
           <p className="text-[11px] font-black text-[#1b4935] mb-1">{tracking?'● GRABANDO GPS':'REGISTRAR RECORRIDO GPS'}</p>
           <div className="flex flex-wrap gap-1.5">
@@ -337,7 +418,11 @@ export function WayvoLeafletMap({ activeRoute = null, compact = false, onRouteSe
           {savedTracks.length>0 && <div className="max-h-28 overflow-y-auto mt-1 space-y-1">{savedTracks.map(t=><div key={t.id} className="flex gap-1 w-full"><button onClick={()=>showSaved(t.points)} className="flex-1 rounded-md bg-[#e8efdc] text-[#1b4935] p-1.5 text-left text-[10px] font-semibold">Recorrido #{t.id} · {t.created_at} · {t.points.length} puntos</button><button onClick={()=>deleteSaved(t.id)} className="bg-[#f8e8de] text-[#783e34] rounded-md px-2 text-[10px]" aria-label={`Eliminar recorrido ${t.id}`}><Trash2 size={12}/></button></div>)}</div>}
         </div>
       </div>}
-      {gpsPosition && <div className="absolute z-[500] top-16 right-2 bg-[#fffdf1] rounded-md px-2 py-1 text-[10px] font-bold text-[#1b4935] border border-[#74917b]">● GPS activo</div>}
+      {gpsPosition && !trip && <div className="absolute z-[500] top-16 right-2 bg-[#fffdf1] rounded-md px-2 py-1 text-[10px] font-bold text-[#1b4935] border border-[#74917b]">● GPS activo</div>}
+      {!compact && trip?.found && <div className="wayvo-map-stop-panel absolute z-[500] top-16 left-2 right-2">
+        <strong className="flex gap-1.5 items-center"><MapPin size={14}/> {nearestStop?`Paradero estimado: ${nearestStop.name}`:locating?'Buscando tu GPS…':'Activa Mi GPS para encontrar un paradero'}</strong>
+        <span>{nearestStop?`${Math.round(nearestStop.meters)} m en línea recta desde tu GPS · NO es una ruta para caminar`:'También puedes usar el punto de subida indicado por Ruta Express.'}</span>
+      </div>}
       {error && <div role="alert" className="absolute z-[500] left-2 right-2 bottom-16 rounded-xl bg-[#fff8db]/95 border border-[#b57c45] p-2 flex items-start gap-2 text-xs text-[#663d20] shadow-md"><AlertCircle size={16} className="shrink-0" />{error}</div>}
       {!compact && <div className="absolute z-[500] left-2 bottom-16 max-w-[78%] rounded-lg bg-[#fffdf1]/95 border border-[#74917b] px-2 py-1 text-[10px] font-bold text-[#1b4935] pointer-events-none">{busStatus}</div>}
       {compact && <div className="wayvo-preview-tap absolute z-[500] right-3 top-14 pointer-events-none">Toca el mapa para ampliar ↗</div>}

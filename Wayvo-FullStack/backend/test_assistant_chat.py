@@ -46,6 +46,21 @@ class RoutePlannerTests(unittest.TestCase):
         self.assertIn('Laureles',demo_stops())
         self.assertEqual(len(demo_stops()),len(set(demo_stops())))
 
+    def test_chat_exposes_structured_map_route(self):
+        result=chat_reply([{'role':'user','content':'¿Cómo llego de Bello a Envigado?'}],None,lambda *a: None)
+        self.assertTrue(result['trip']['found'])
+        self.assertEqual(result['trip']['segments'][0]['bus'],'WV-302')
+        self.assertNotIn('¿Cómo llego de Bello a Envigado?',result['answer'])
+
+    def test_chat_transfer_exposes_both_buses(self):
+        result=chat_reply([{'role':'user','content':'Quiero ir de Laureles a Envigado'}],None,lambda *a: None)
+        self.assertEqual([s['bus'] for s in result['trip']['segments']],['WV-306','WV-302'])
+        self.assertNotIn('Quiero ir de Laureles a Envigado',result['answer'])
+
+    def test_chat_without_known_route_has_no_map_cta(self):
+        result=chat_reply([{'role':'user','content':'Quiero ir de Bogotá a Cartagena'}],None,lambda *a: None)
+        self.assertIsNone(result['trip'])
+
     def test_unknown_does_not_invent(self):
         self.assertEqual(plan_route('Bogotá','Cartagena'),[])
     def test_gps_without_location_does_not_guess(self):

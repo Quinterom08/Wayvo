@@ -157,7 +157,7 @@ def local_answer(question, location=None):
         steps=plan_route(origin,dest)
         if steps:
             label=format_plan(steps)
-            return f'Para ir de {origin.title()} a {dest.title()}, mi propuesta es: {label}. {"Necesitas un transbordo." if len(steps)>1 else "Es un trayecto directo en la simulación."} Tarifa de referencia ficticia: $3.200 COP por bus. Estos recorridos y tiempos son académicos, no rutas oficiales ni servicios en vivo.'
+            return f'Ruta recomendada de demostración: {label}. {"Necesitas un transbordo." if len(steps)>1 else "Es un trayecto directo en la simulación."} Puedes abrir el recorrido y el paradero estimado desde el botón «Ver en el mapa». Los buses y tarifas son ficticios; no utilices este resultado como indicación de transporte real.'
         return ('No encuentro una conexión verificable en las rutas de prueba para esos dos lugares. '
                 'En esta demostración puedes consultar Bello, Envigado, Laureles, Centro, Belén, Robledo, Itagüí, La América, Aranjuez y zonas conectadas. '
                 'No te inventaré un bus que no esté en el catálogo.')
@@ -176,7 +176,12 @@ def chat_reply(messages, location, fetch_json):
     question=messages[-1]['content']
     local=local_answer(question,location)
     # Public transport route choices and GPS are deterministic: the model may not change or invent them.
-    if parse_places(question) or any(x in normalize(question) for x in ('donde estoy','mi ubicacion','ubicacion actual','donde me encuentro')):
+    places = parse_places(question)
+    if places:
+        trip=quick_route(*places)
+        return {'answer':local,'source':'demo_route_engine','demo':True,
+                'trip':trip if trip.get('found') else None}
+    if any(x in normalize(question) for x in ('donde estoy','mi ubicacion','ubicacion actual','donde me encuentro')):
         return {'answer':local,'source':'demo_route_engine','demo':True}
     if not os.environ.get('OPENAI_API_KEY'):
         return {'answer':local,'source':'demo_local','demo':True}
@@ -189,7 +194,7 @@ def chat_reply(messages, location, fetch_json):
         'Nunca presentes rutas de prueba, tarifas de prueba, horarios ni buses como reales o en vivo. '
         'Nunca inventes transbordos, direcciones ni paraderos. Para consultas de origen y destino utiliza este resultado '\
         f'determinista si aplica: {local}. Catálogo de prueba: {json.dumps(DEMO_ROUTES,ensure_ascii=False)}. '
-        +location_note+' Responde preferiblemente en 2-5 frases, salvo que pidan más detalle.'
+        +location_note+' Nunca repitas literalmente la pregunta del usuario ni la uses como introducción. Ve directamente a la respuesta. Responde preferiblemente en 2-5 frases, salvo que pidan más detalle.'
     )
     payload={
         'model':os.environ.get('WAYVO_AI_MODEL','gpt-4.1-mini'),
