@@ -161,6 +161,14 @@ def local_answer(question, location=None):
         return ('No encuentro una conexión verificable en las rutas de prueba para esos dos lugares. '
                 'En esta demostración puedes consultar Bello, Envigado, Laureles, Centro, Belén, Robledo, Itagüí, La América, Aranjuez y zonas conectadas. '
                 'No te inventaré un bus que no esté en el catálogo.')
+    # Un destino sin origen no es una ruta: pide el dato faltante, no inventes un bus.
+    lonely_destination=re.search(r'(?:como (?:voy|llego)|quiero (?:ir|llegar)|necesito (?:ir|llegar))\s+a\s+(.+)',t)
+    if lonely_destination:
+        destination=choose_stop(lonely_destination.group(1).strip(' ¿?¡!.,'))
+        if destination:
+            return (f'Para llegar a {destination}, dime desde qué barrio o paradero sales. '
+                    'También puedes elegir origen y destino en Ruta Express y ver los buses de demostración en el mapa.')
+        return 'Dime desde qué paradero sales y a cuál quieres llegar. Puedes usar Ruta Express para elegirlos.'
     if 'tarifa' in t or 'cuanto cuesta' in t or 'pasaje' in t or 'precio' in t:
         return 'En nuestra simulación académica, cada bus cuesta $3.200 COP (valor ficticio). No representa las tarifas reales de Medellín.'
     if any(x in t for x in ('rutas','buses','paraderos','lineas','bus puedo','que bus')):
@@ -182,6 +190,9 @@ def chat_reply(messages, location, fetch_json):
         return {'answer':local,'source':'demo_route_engine','demo':True,
                 'trip':trip if trip.get('found') else None}
     if any(x in normalize(question) for x in ('donde estoy','mi ubicacion','ubicacion actual','donde me encuentro')):
+
+        return {'answer':local,'source':'demo_route_engine','demo':True}
+    if re.search(r'(?:como (?:voy|llego)|quiero (?:ir|llegar)|necesito (?:ir|llegar))\s+a\s+',normalize(question)) and not places:
         return {'answer':local,'source':'demo_route_engine','demo':True}
     if not os.environ.get('OPENAI_API_KEY'):
         return {'answer':local,'source':'demo_local','demo':True}
@@ -209,6 +220,9 @@ def chat_reply(messages, location, fetch_json):
         output='\n'.join(block.get('text','') for item in response.get('output',[])
                          for block in item.get('content',[]) if block.get('type')=='output_text').strip()
         if output:return {'answer':output,'source':'openai','demo':True}
-    except (HTTPError,URLError,OSError,ValueError,KeyError,TimeoutError):
-        pass
-    return {'answer':local+'\n\n(La IA externa no está disponible; respuesta local de demostración.)','source':'demo_local','demo':True}
+    except HTTPError as exc:
+        # Reporta el código HTTP en la consola, sin registrar la API key ni el mensaje del usuario.
+        print(f'Wayvo IA: proveedor externo respondió HTTP {exc.code}', flush=True)
+    except (URLError,OSError,ValueError,KeyError,TimeoutError) as exc:
+        print(f'Wayvo IA: conexión externa no disponible ({type(exc).__name__})', flush=True)
+    return {'answer':'El asistente de IA externa no respondió en este momento. Puedes seguir usando Ruta Express y las rutas simuladas de Wayvo.','source':'demo_local','demo':True}

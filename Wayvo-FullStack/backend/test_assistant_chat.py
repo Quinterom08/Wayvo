@@ -63,6 +63,12 @@ class RoutePlannerTests(unittest.TestCase):
 
     def test_unknown_does_not_invent(self):
         self.assertEqual(plan_route('Bogotá','Cartagena'),[])
+    def test_destination_without_origin_requests_clarification(self):
+        result=chat_reply([{'role':'user','content':'¿Cómo voy a Bello?'}],None,lambda *args:None)
+        self.assertIn('dime desde qué',result['answer'].lower())
+        self.assertNotIn('OPENAI_API_KEY',result['answer'])
+        self.assertIsNone(result.get('trip'))
+
     def test_gps_without_location_does_not_guess(self):
         self.assertIn('GPS',local_answer('¿Dónde estoy?',None))
     def test_offline_fallback_is_honest(self):

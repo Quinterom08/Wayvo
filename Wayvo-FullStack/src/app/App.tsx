@@ -573,10 +573,18 @@ function MapScreen({activeRoute, trip, onRouteChange, onBack, isAdmin}: {
       <div className="flex-1 min-w-0"><strong>Mapa de Wayvo</strong><small>Medellín · recorridos de demostración</small></div>
       <Map size={19} aria-hidden="true"/>
     </div>
-    {trip?.found && <div className="wayvo-map-itinerary" aria-label="Resumen del recorrido seleccionado">
-      <strong><Navigation2 size={15}/> {trip.segments?.map(x=>x.bus).join(' → ')}</strong>
-      <span>{trip.origin} → {trip.destination} · {trip.transfers||0} transbordos</span>
-      <small>El GPS señalará el paradero estimado más próximo del primer tramo. Rutas ficticias.</small>
+    {trip?.found && <div className="wayvo-map-itinerary" aria-label="Instrucciones de la ruta seleccionada">
+      <strong><Navigation2 size={15}/> Recorrido simulado · {trip.origin} → {trip.destination}</strong>
+      <ol className="wayvo-map-steps">
+        {trip.segments?.map((leg,index)=><li key={`${leg.bus}-${index}`}>
+          <span className="wayvo-step-number">{index+1}</span>
+          <span><b>{index===0?'Sube':'Transborda'} al {leg.bus}</b> en <b>{leg.board_at}</b>.
+            {' '}Baja en <b>{leg.get_off_at}</b>{index<trip.segments!.length-1?' para tomar el siguiente bus.':'.'}
+            <small>{leg.stop_count} paradas · ruta ficticia</small>
+          </span>
+        </li>)}
+      </ol>
+      <small>En el mapa: líneas coloreadas = buses; tramo continuo = tu trayecto; punto amarillo = transbordo; punto café = destino. No es navegación real.</small>
     </div>}
     <div className="flex-1 relative min-h-0">
       <WayvoLeafletMap activeRoute={activeRoute} trip={trip?.found?trip:null} onRouteSelect={onRouteChange} isAdmin={isAdmin}
@@ -831,7 +839,16 @@ function HomeScreen({user, unread, onNavigate}: {
   ];
   return <div className="wayvo-home flex-1 min-h-0 overflow-y-auto">
     <header className="wayvo-inline-brand" aria-label="Wayvo, tu ciudad en movimiento">
-      <div className="wayvo-banner-mark">W<span>↗</span></div>
+      <div
+  className="wayvo-banner-mark"
+  style={{ width: 52, height: 44, padding: 2 }}
+>
+  <img
+    src="/logo-wayvo.png"
+    alt="Logo Wayvo"
+    className="block w-full h-full object-contain"
+  />
+</div>
       <div className="flex-1"><strong>WAYVO</strong><small>LA CIUDAD ES TUYA · V1.3 EXPO</small></div>
       <span className="wayvo-banner-route" aria-hidden="true">● ─ ─ ●</span>
     </header>

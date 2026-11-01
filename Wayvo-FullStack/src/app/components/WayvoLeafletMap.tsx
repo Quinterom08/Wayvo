@@ -3,23 +3,9 @@ import * as L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { AlertCircle, LocateFixed, MapPin, Play, Square, Save, Trash2, History } from 'lucide-react';
 
-// Coordenadas ILUSTRATIVAS del proyecto de grado: líneas rectas aproximadas
-// entre puntos del Valle de Aburrá. NO son recorridos validados sobre calles.
-export const DEMO_PATHS: {
-  id: string;
-  color: string;
-  name: string;
-  points: L.LatLngTuple[];
-}[] = [
-  { id: '302', color: '#2563EB', name: 'Bello — Envigado', points: [[6.334, -75.558], [6.300, -75.560], [6.273, -75.566], [6.251, -75.569], [6.240, -75.572], [6.210, -75.573], [6.174, -75.591]] },
-  { id: '306', color: '#D97706', name: 'Laureles — Centro', points: [[6.245, -75.603], [6.250, -75.592], [6.255, -75.586], [6.250, -75.576], [6.245, -75.569]] },
-  { id: '311', color: '#059669', name: 'Belén — Robledo', points: [[6.223, -75.601], [6.236, -75.608], [6.255, -75.601], [6.269, -75.591], [6.282, -75.595]] },
-  { id: '315', color: '#7C3AED', name: 'La América — Itagüí', points: [[6.251, -75.613], [6.246, -75.591], [6.226, -75.576], [6.199, -75.579], [6.176, -75.597], [6.168, -75.614]] },
-  { id: '301', color: '#DC2626', name: 'Circular Norte', points: [[6.282, -75.563], [6.291, -75.556], [6.300, -75.562], [6.301, -75.578], [6.286, -75.580], [6.282, -75.563]] },
-];
-
-// Coordenadas aproximadas de los paraderos FICTICIOS del motor de rutas.
-// Mantener coherencia entre los nombres de backend/assistant_chat.py y este mapa.
+// Coordenadas de paraderos FICTICIOS del catálogo académico.
+// Una única fuente de coordenadas en frontend evita marcadores fuera de la línea.
+// El orden coincide con backend/assistant_chat.py; NO representa calles reales.
 export const DEMO_STOP_COORDS: Record<string, L.LatLngTuple> = {
   'Bello':[6.334,-75.558], 'Niquía':[6.317,-75.558], 'Madera':[6.300,-75.560],
   'Acevedo':[6.283,-75.564], 'Universidad':[6.265,-75.568], 'Centro':[6.246,-75.570],
@@ -29,6 +15,23 @@ export const DEMO_STOP_COORDS: Record<string, L.LatLngTuple> = {
   'Robledo':[6.282,-75.595], 'Sabaneta':[6.176,-75.597], 'Itagüí':[6.168,-75.614],
   'Aranjuez':[6.282,-75.563], 'Manrique':[6.291,-75.556], 'Santa Cruz':[6.300,-75.562],
 };
+
+const DEMO_ROUTE_STOPS: Record<string, string[]> = {
+  '302':['Bello','Niquía','Madera','Acevedo','Universidad','Centro','El Poblado','Envigado'],
+  '306':['Laureles','Estadio','Suramericana','Centro'],
+  '311':['Belén','La América','Estadio','Floresta','Robledo'],
+  '315':['La América','Suramericana','El Poblado','Sabaneta','Itagüí'],
+  '301':['Aranjuez','Manrique','Santa Cruz','Acevedo','Aranjuez'],
+};
+
+export const DEMO_PATHS: {id:string;color:string;name:string;points:L.LatLngTuple[]}[] = [
+  {id:'302',color:'#2563EB',name:'Bello — Envigado'},
+  {id:'306',color:'#D97706',name:'Laureles — Centro'},
+  {id:'311',color:'#059669',name:'Belén — Robledo'},
+  {id:'315',color:'#7C3AED',name:'La América — Itagüí'},
+  {id:'301',color:'#DC2626',name:'Circular Norte'},
+].map(route=>({...route,points:DEMO_ROUTE_STOPS[route.id].map(stop=>DEMO_STOP_COORDS[stop])}));
+
 export type MapTrip = {
   found: boolean; origin?:string; destination?:string;
   segments?: {bus:string;board_at:string;get_off_at:string;stops:string[]}[];
@@ -63,7 +66,11 @@ export function WayvoLeafletMap({ activeRoute = null, trip = null, compact = fal
   const trackLineRef = useRef<L.Polyline | null>(null);
   const watchIdRef = useRef<number | null>(null);
   const locationWatchIdRef = useRef<number | null>(null);
-  const firstGpsFixRef = useRef(true);
+  const gpsRequestRef = useRef(0);
+  const gpsTimeoutRef = useRef<number | null>(null);
+  const gpsBusyRef = useRef(false);
+  const tripRef = useRef(trip);
+  tripRef.current = trip;
   const busLayerRef = useRef<L.LayerGroup | null>(null);
   const loadBusesRef = useRef(onLoadBuses);
   loadBusesRef.current = onLoadBuses;
@@ -85,6 +92,7 @@ export function WayvoLeafletMap({ activeRoute = null, trip = null, compact = fal
   const [locating, setLocating] = useState(false);
   const [error, setError] = useState('');
   const [gpsPosition, setGpsPosition] = useState<L.LatLngTuple | null>(null);
+  const [gpsNote,setGpsNote] = useState('');
   const [nearestStop,setNearestStop] = useState<{name:string;meters:number}|null>(null);
 
   useEffect(() => {
@@ -156,6 +164,10 @@ export function WayvoLeafletMap({ activeRoute = null, trip = null, compact = fal
     return () => {
       cancelAnimationFrame(frame);
       resize.disconnect();
+      gpsRequestRef.current++;
+      gpsBusyRef.current=false;
+      if (gpsTimeoutRef.current !== null) window.clearTimeout(gpsTimeoutRef.current);
+      gpsTimeoutRef.current=null;
       if (watchIdRef.current !== null) navigator.geolocation?.clearWatch(watchIdRef.current);
       if (locationWatchIdRef.current !== null) navigator.geolocation?.clearWatch(locationWatchIdRef.current);
       watchIdRef.current = null;
@@ -185,31 +197,43 @@ export function WayvoLeafletMap({ activeRoute = null, trip = null, compact = fal
     if (chosen) map.fitBounds(chosen.getBounds().pad(.26), { animate: true, maxZoom: 14 });
   }, [activeRoute, compact, trip]);
 
-  // Itinerary preview: highlight every bus and its boarding/alighting markers.
-  // We never claim these approximate lines are turn-by-turn street directions.
+  // Se dibuja el bus completo de fondo y, encima, ÚNICAMENTE las paradas
+  // recorridas en cada tramo (también en sentido inverso).
   useEffect(()=>{
     const map=mapRef.current, group=journeyRef.current;
-    if(!map || !group) return;
-    group.clearLayers();setNearestStop(null);
-    if(!trip?.found || !trip.segments?.length) return;
+    if(!map || !group)return;
+    group.clearLayers();
+    setNearestStop(null);
+    if(!trip?.found || !trip.segments?.length)return;
     const bounds:L.LatLngTuple[]=[];
     trip.segments.forEach((leg,index)=>{
       const routeId=leg.bus.replace(/^WV-/, '');
-      const full=DEMO_PATHS.find(route=>route.id===routeId);
-      if(full){bounds.push(...full.points);}
-      const from=DEMO_STOP_COORDS[leg.board_at];
-      const to=DEMO_STOP_COORDS[leg.get_off_at];
-      if(from){bounds.push(from);
-        L.circleMarker(from,{radius:10,color:'#fffdf1',weight:3,fillColor:index?'#e6d681':'#1b4935',fillOpacity:1})
-          .bindTooltip(index?`Transbordo: ${leg.bus} · ${leg.board_at}`:`Sube a ${leg.bus} en ${leg.board_at}`)
-          .addTo(group);
+      const color=DEMO_PATHS.find(r=>r.id===routeId)?.color||'#1b4935';
+      const visited=leg.stops.map(name=>DEMO_STOP_COORDS[name]).filter((p):p is L.LatLngTuple=>!!p);
+      if(visited.length>1){
+        L.polyline(visited,{color:'#fffdf1',weight:10,opacity:1,interactive:false}).addTo(group);
+        L.polyline(visited,{color,weight:7,opacity:1,interactive:false}).addTo(group);
+        bounds.push(...visited);
       }
-      if(to){bounds.push(to);
-        L.circleMarker(to,{radius:8,color:'#fffdf1',weight:3,fillColor:'#b96032',fillOpacity:1})
-          .bindTooltip(`Baja de ${leg.bus} en ${leg.get_off_at}`).addTo(group);
+      const first=DEMO_STOP_COORDS[leg.board_at];
+      const last=DEMO_STOP_COORDS[leg.get_off_at];
+      if(first){
+        const marker=L.circleMarker(first,{radius:11,color:'#fffdf1',weight:3,fillColor:index===0?'#1b4935':'#e6d681',fillOpacity:1});
+        marker.bindTooltip(index===0?`INICIO · Sube al ${leg.bus} en ${leg.board_at}`:`TRANSBORDO ${index} · Sube al ${leg.bus} en ${leg.board_at}`);
+        marker.addTo(group);
+        bounds.push(first);
+      }
+      if(last){
+        // Un único punto de transbordo coincide para la bajada y subida
+        // siguiente. Los pasos completos aparecen en el resumen superior.
+        const isTransfer=index<trip.segments!.length-1;
+        L.circleMarker(last,{radius:isTransfer?12:10,color:'#fffdf1',weight:3,fillColor:isTransfer?'#e6d681':'#b96032',fillOpacity:1})
+          .bindTooltip(isTransfer?`TRANSBORDO · Baja de ${leg.bus} y toma ${trip.segments![index+1].bus} en ${leg.get_off_at}`:`DESTINO · Baja de ${leg.bus} en ${leg.get_off_at}`)
+          .addTo(group);
+        bounds.push(last);
       }
     });
-    if(bounds.length)map.fitBounds(L.latLngBounds(bounds).pad(.13),{maxZoom:14,animate:false});
+    if(bounds.length)map.fitBounds(L.latLngBounds(bounds).pad(.22),{maxZoom:14,animate:false});
   },[trip,compact]);
 
   // Find the nearest ESTIMATED stop from the first leg using the user's real GPS.
@@ -268,41 +292,82 @@ export function WayvoLeafletMap({ activeRoute = null, trip = null, compact = fal
     return ()=>{cancelled=true;window.clearInterval(timer);};
   }, [compact]);
 
-  // Viewer GPS: continuous position on the map after an explicit tap, never saved
-  // as a bus journey and never uploaded to the Wayvo backend.
+  // GPS del pasajero: obtención inicial con límite de tiempo, reintento
+  // de precisión estándar y seguimiento posterior. Nunca se almacena ni envía.
   function locate() {
-    if (!navigator.geolocation) {setError('Este dispositivo no tiene geolocalización disponible.');return;}
-    if (!window.isSecureContext) {setError('El GPS requiere HTTPS. En iPhone, abrir la IP del PC por HTTP no permite utilizar la ubicación.');return;}
-    if (locationWatchIdRef.current !== null) {
-      const map=mapRef.current;
-      if(gpsPosition && map) map.setView(gpsPosition,15,{animate:true});
-      return;
-    }
-    setLocating(true);setError('');firstGpsFixRef.current=true;
-    locationWatchIdRef.current=navigator.geolocation.watchPosition((position)=>{
-      const point:L.LatLngTuple=[position.coords.latitude,position.coords.longitude];
-      setGpsPosition(point);setLocating(false);
-      const map=mapRef.current;
-      if(!map)return;
+    if(!navigator.geolocation){setLocating(false);setError('GPS no disponible: selecciona un origen manual en Ruta Express.');return;}
+    if(!window.isSecureContext){setLocating(false);setError('Para usar GPS desde iPhone o Android abre Wayvo con HTTPS y autoriza la ubicación.');return;}
+    if(gpsBusyRef.current)return;
+    const map=mapRef.current;
+    if(gpsPosition && locationWatchIdRef.current!==null){map?.setView(gpsPosition,15,{animate:true});return;}
+    const request=++gpsRequestRef.current;
+    gpsBusyRef.current=true;
+    setLocating(true);setError('');setGpsNote('Solicitando ubicación…');
+    if(gpsTimeoutRef.current!==null)window.clearTimeout(gpsTimeoutRef.current);
+    let finished=false;
+    const finish=()=>{
+      if(finished || request!==gpsRequestRef.current)return false;
+      finished=true;
+      gpsBusyRef.current=false;setLocating(false);
+      if(gpsTimeoutRef.current!==null)window.clearTimeout(gpsTimeoutRef.current);
+      gpsTimeoutRef.current=null;
+      return true;
+    };
+    const applyFix=(position:GeolocationPosition,first:boolean)=>{
+      if(request!==gpsRequestRef.current)return;
+      const {latitude,longitude,accuracy:acc}=position.coords;
+      if(!Number.isFinite(latitude)||!Number.isFinite(longitude))return;
+      const point:L.LatLngTuple=[latitude,longitude];
+      setGpsPosition(point);
+      setGpsNote(`GPS activo · precisión aproximada ±${Math.round(acc)} m`);
+      const visibleMap=mapRef.current;
+      if(!visibleMap)return;
       locationRef.current?.remove();
-      const accuracyCircle=L.circle(point,{radius:Math.min(position.coords.accuracy||25,2000),color:'#286447',weight:1,fillColor:'#286447',fillOpacity:0.10});
-      const marker=L.circleMarker(point,{radius:8,color:'#fffef3',weight:3,fillColor:'#1b4935',fillOpacity:1})
-        .bindPopup(`Tu ubicación aproximada · ±${Math.round(position.coords.accuracy||0)} m`);
-      locationRef.current=L.layerGroup([accuracyCircle,marker]).addTo(map);
-      // On first fix center, then let the user explore without jumping the map.
-      if(firstGpsFixRef.current){
-        firstGpsFixRef.current=false;
-        if(trip?.found && trip.segments?.length){
-          const path=trip.segments.flatMap(leg=>DEMO_PATHS.find(r=>r.id===leg.bus.replace(/^WV-/,''))?.points||[]);
-          map.fitBounds(L.latLngBounds([point,...path]).pad(.12),{maxZoom:14,animate:true});
-        }else map.setView(point,compact?13:15,{animate:true});
+      locationRef.current=L.layerGroup([
+        L.circle(point,{radius:Math.min(acc||25,2000),color:'#286447',weight:1,fillColor:'#286447',fillOpacity:.10}),
+        L.circleMarker(point,{radius:8,color:'#fffef3',weight:3,fillColor:'#1b4935',fillOpacity:1})
+          .bindPopup(`Tu GPS · precisión aprox. ±${Math.round(acc)} m`)
+      ]).addTo(visibleMap);
+      if(first){
+        const currentTrip=tripRef.current;
+        const path=currentTrip?.segments?.flatMap(leg=>leg.stops.map(stop=>DEMO_STOP_COORDS[stop]).filter((p):p is L.LatLngTuple=>!!p))||[];
+        if(path.length && visibleMap.distance(point,path[0])<35000)
+          visibleMap.fitBounds(L.latLngBounds([point,...path]).pad(.18),{maxZoom:14,animate:true});
+        else if(!path.length)visibleMap.setView(point,15,{animate:true});
+        // Fuera de Medellín no alejar el mapa de la ruta simulada para mostrar el GPS.
       }
-    },(cause)=>{
-      setLocating(false);
+    };
+    const success=(position:GeolocationPosition)=>{
+      if(!finish())return;
+      setError('');applyFix(position,true);
       if(locationWatchIdRef.current!==null)navigator.geolocation.clearWatch(locationWatchIdRef.current);
-      locationWatchIdRef.current=null;
-      setError(cause.code===1?'Acceso a ubicación denegado. Habilítalo en los ajustes del dispositivo.':'No se pudo obtener tu ubicación. Activa el GPS y prueba desde HTTPS.');
-    },{enableHighAccuracy:true,timeout:15000,maximumAge:10000});
+      locationWatchIdRef.current=navigator.geolocation.watchPosition(
+        position=>applyFix(position,false),
+        ()=>{setGpsNote('Última ubicación disponible. Toca Mi GPS para reintentar si cambias de lugar.');
+             if(locationWatchIdRef.current!==null)navigator.geolocation.clearWatch(locationWatchIdRef.current);
+             locationWatchIdRef.current=null;},
+        {enableHighAccuracy:false,timeout:15000,maximumAge:15000}
+      );
+    };
+    const fail=(reason:GeolocationPositionError)=>{
+      if(!finish())return;
+      setGpsNote('GPS no disponible');
+      setError(reason.code===1
+        ?'Permiso de ubicación denegado. Actívalo en Safari/Ajustes y pulsa Mi GPS.'
+        : 'No pudimos localizarte. Comprueba la ubicación del celular, el HTTPS y vuelve a pulsar Mi GPS. También puedes elegir el origen manualmente.');
+    };
+    gpsTimeoutRef.current=window.setTimeout(()=>{
+      if(!finish())return;
+      setGpsNote('GPS no disponible');
+      setError('El GPS tardó demasiado. Toca Mi GPS para reintentar o selecciona el origen manualmente.');
+    },21000);
+    navigator.geolocation.getCurrentPosition(success, reason=>{
+      if(request!==gpsRequestRef.current)return;
+      if(reason.code===1){fail(reason);return;}
+      setGpsNote('Buscando señal alternativa…');
+      navigator.geolocation.getCurrentPosition(success,fail,
+        {enableHighAccuracy:false,timeout:8000,maximumAge:30000});
+    },{enableHighAccuracy:true,timeout:8500,maximumAge:15000});
   }
 
   function distanceMeters(a:GpsPoint,b:GpsPoint) {
@@ -401,6 +466,7 @@ export function WayvoLeafletMap({ activeRoute = null, trip = null, compact = fal
         aria-label="Activar GPS y localizarme" title="Mi ubicación (GPS en directo)"
         className="absolute z-[500] top-3 right-3 bg-[#fffdf1] border-2 border-[#1b4935] rounded-xl p-2.5 text-[#1b4935] shadow-md disabled:opacity-60 flex gap-1 items-center">
         <LocateFixed size={19} className={locating ? 'animate-pulse' : ''} />
+        {!compact && <span className="text-[10px] font-black">{locating?'Buscando…':'Mi GPS'}</span>}
         {compact && <span className="text-[10px] font-black">Mi GPS</span>}
       </button>
       {!compact && isAdmin && !trip?.found && <div className="absolute z-[500] top-16 left-2 right-2 pointer-events-none flex flex-col items-start gap-1">
@@ -420,8 +486,8 @@ export function WayvoLeafletMap({ activeRoute = null, trip = null, compact = fal
       </div>}
       {gpsPosition && !trip && <div className="absolute z-[500] top-16 right-2 bg-[#fffdf1] rounded-md px-2 py-1 text-[10px] font-bold text-[#1b4935] border border-[#74917b]">● GPS activo</div>}
       {!compact && trip?.found && <div className="wayvo-map-stop-panel absolute z-[500] top-16 left-2 right-2">
-        <strong className="flex gap-1.5 items-center"><MapPin size={14}/> {nearestStop?`Paradero estimado: ${nearestStop.name}`:locating?'Buscando tu GPS…':'Activa Mi GPS para encontrar un paradero'}</strong>
-        <span>{nearestStop?`${Math.round(nearestStop.meters)} m en línea recta desde tu GPS · NO es una ruta para caminar`:'También puedes usar el punto de subida indicado por Ruta Express.'}</span>
+        <strong className="flex gap-1.5 items-center"><MapPin size={14}/> {nearestStop?`Paradero estimado: ${nearestStop.name}`:locating?'Buscando tu GPS…':gpsPosition?'GPS disponible · comprueba el paradero':'Toca Mi GPS para buscar el paradero'}</strong>
+        <span>{nearestStop?`${Math.round(nearestStop.meters)} m en línea recta desde tu GPS · NO es una ruta para caminar`:`${gpsNote||'Si no aparece el GPS, usa el origen manual.'} · El paradero de subida se indica arriba.`}</span>
       </div>}
       {error && <div role="alert" className="absolute z-[500] left-2 right-2 bottom-16 rounded-xl bg-[#fff8db]/95 border border-[#b57c45] p-2 flex items-start gap-2 text-xs text-[#663d20] shadow-md"><AlertCircle size={16} className="shrink-0" />{error}</div>}
       {!compact && <div className="absolute z-[500] left-2 bottom-16 max-w-[78%] rounded-lg bg-[#fffdf1]/95 border border-[#74917b] px-2 py-1 text-[10px] font-bold text-[#1b4935] pointer-events-none">{busStatus}</div>}

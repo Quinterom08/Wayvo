@@ -267,3 +267,13 @@
   .wayvo-map-stop-panel {top:64px;}
   .wayvo-map-itinerary {padding:9px 11px;}
 }
+
+/* Wayvo v1.3.1 - itinerarios claros sin invadir el mapa en iPhone */
+.wayvo-map-itinerary {max-height:min(33dvh,245px);overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;}
+.wayvo-map-steps {list-style:none;display:flex;flex-direction:column;gap:7px;margin:4px 0;padding:0;}
+.wayvo-map-steps li {display:flex;gap:9px;align-items:flex-start;font-size:12px;line-height:1.36;color:#234634;}
+.wayvo-map-steps li span:last-child {min-width:0;overflow-wrap:anywhere;}
+.wayvo-map-steps .wayvo-step-number {display:grid;place-items:center;flex:0 0 23px;height:23px;border-radius:50%;background:#1b4935;color:#fffdf1;font-size:12px;font-weight:800;}
+.wayvo-map-steps li small {display:block;color:#6c806d;font-size:10px;margin-top:2px;}
+.wayvo-map-stop-panel {max-height:88px;overflow:auto;pointer-events:auto;}
+@media(max-width:390px){.wayvo-map-itinerary{max-height:30dvh;padding:8px 10px;}.wayvo-map-stop-panel{top:56px;}}
