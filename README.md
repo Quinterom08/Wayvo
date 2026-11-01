@@ -1,5 +1,4 @@
 <img width="1600" height="520" alt="wayvo-banner" src="https://github.com/user-attachments/assets/9537bd42-8042-42fe-b9b8-ad8165dcd4e6" />
-[README.md](https://github.com/user-attachments/files/34230008/README.md)
 ![Wayvo — Tu ciudad, tu ruta](./wayvo-banner.png)
 
 # 🚌 Wayvo
