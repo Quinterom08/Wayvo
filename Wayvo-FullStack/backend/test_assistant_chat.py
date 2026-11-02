@@ -61,6 +61,46 @@ class RoutePlannerTests(unittest.TestCase):
         result=chat_reply([{'role':'user','content':'Quiero ir de Bogotá a Cartagena'}],None,lambda *a: None)
         self.assertIsNone(result['trip'])
 
+    def test_chat_colloquial_departure_arrival_gets_map_button_data(self):
+        for question in (
+            'Estoy en Laureles, quiero ir a Bello',
+            '¿Qué bus me lleva a Bello desde Laureles?',
+            '¿Cómo voy a Bello desde Laureles?',
+            'Estoy en Laureles y quiero llegar a Bello',
+            '¿Cómo llego a Bello si estoy en Laureles?',
+        ):
+            with self.subTest(question=question):
+                reply=chat_reply([{'role':'user','content':question}],None,lambda *args:None)
+                self.assertTrue(reply['trip']['found'])
+                self.assertEqual(reply['trip']['origin'],'Laureles')
+                self.assertEqual(reply['trip']['destination'],'Bello')
+                self.assertIn('Ver ruta y paradero en el mapa',reply['answer'])
+
+    def test_chat_followup_origin_gets_structured_route(self):
+        messages=[
+            {'role':'user','content':'¿Cómo voy a Bello?'},
+            {'role':'assistant','content':'¿Desde qué paradero sales?'},
+            {'role':'user','content':'Desde Laureles'},
+        ]
+        reply=chat_reply(messages,None,lambda *args:None)
+        self.assertTrue(reply['trip']['found'])
+        self.assertEqual(reply['trip']['origin'],'Laureles')
+        self.assertEqual(reply['trip']['destination'],'Bello')
+
+    def test_chat_followup_destination_gets_structured_route(self):
+        messages=[
+            {'role':'user','content':'Estoy en Laureles'},
+            {'role':'assistant','content':'¿A dónde quieres ir?'},
+            {'role':'user','content':'Quiero ir a Envigado'},
+        ]
+        reply=chat_reply(messages,None,lambda *args:None)
+        self.assertTrue(reply['trip']['found'])
+        self.assertEqual(reply['trip']['transfers'],1)
+
+    def test_non_travel_place_question_has_no_map_cta(self):
+        reply=chat_reply([{'role':'user','content':'¿Cuál es la historia de Bello y Envigado?'}],None,lambda *args:None)
+        self.assertIsNone(reply.get('trip'))
+
     def test_unknown_does_not_invent(self):
         self.assertEqual(plan_route('Bogotá','Cartagena'),[])
     def test_destination_without_origin_requests_clarification(self):
@@ -80,4 +120,71 @@ class RoutePlannerTests(unittest.TestCase):
         finally:
             if old is not None:os.environ['OPENAI_API_KEY']=old
 
-if __name__=='__main__':unittest.main()
+
+class ConversationRegressionTests(unittest.TestCase):
+    """Multiple route searches must work during the same chat session."""
+
+    def test_successive_routes_and_short_followups(self):
+        questions = [
+            ('¿Cómo llego de Bello a Envigado?', 'Bello', 'Envigado'),
+            ('¿Y de Envigado a Bello?', 'Envigado', 'Bello'),
+            ('Ahora de Laureles a Envigado', 'Laureles', 'Envigado'),
+            ('¿Y ahora a Robledo?', 'Laureles', 'Robledo'),
+            ('¿Y en sentido contrario?', 'Robledo', 'Laureles'),
+            ('¿Me llevas de Belén a Centro?', 'Belén', 'Centro'),
+            ('de laureles a envigado', 'Laureles', 'Envigado'),
+            ('¿Qué tal de Bello a Niquía?', 'Bello', 'Niquía'),
+        ]
+        messages = []
+        for question, departure, arrival in questions:
+            with self.subTest(question=question):
+                messages.append({'role':'user', 'content':question})
+                result = chat_reply(messages[-20:], None, lambda *args: None)
+                self.assertTrue(result.get('trip', {}).get('found'), result)
+                self.assertEqual(result['trip']['origin'], departure)
+                self.assertEqual(result['trip']['destination'], arrival)
+                messages.append({'role':'assistant', 'content':result['answer']})
+
+    def test_clarification_then_new_destination_then_reverse(self):
+        messages = []
+        for question, expected in [
+            ('¿Cómo voy a Bello?', None),
+            ('Desde Laureles', ('Laureles', 'Bello')),
+            ('Ahora a Envigado', ('Laureles', 'Envigado')),
+            ('Y en sentido contrario', ('Envigado', 'Laureles')),
+        ]:
+            messages.append({'role':'user', 'content':question})
+            result = chat_reply(messages[-20:], None, lambda *args: None)
+            if expected:
+                self.assertTrue(result.get('trip', {}).get('found'), result)
+                self.assertEqual((result['trip']['origin'], result['trip']['destination']), expected)
+            else:
+                self.assertFalse(result.get('trip'))
+            messages.append({'role':'assistant', 'content':result['answer']})
+
+    def test_unrelated_question_clears_implicit_route_context(self):
+        messages = [
+            {'role':'user', 'content':'Cómo voy de Bello a Envigado'},
+            {'role':'assistant', 'content':'Ruta WV-302'},
+            {'role':'user', 'content':'¿Quién escribió Don Quijote?'},
+            {'role':'assistant', 'content':'Miguel de Cervantes'},
+            {'role':'user', 'content':'¿Y ahora a Robledo?'},
+        ]
+        result = chat_reply(messages, None, lambda *args: None)
+        self.assertFalse(result.get('trip'))
+
+    def test_does_not_invent_bus_for_unregistered_place(self):
+        messages = [
+            {'role':'user', 'content':'¿Cómo llego de Bello a Envigado?'},
+            {'role':'assistant', 'content':'Viaje de prueba'},
+            {'role':'user', 'content':'¿Y de Bogotá a Envigado?'},
+        ]
+        result = chat_reply(messages, None, lambda *args: None)
+        self.assertIsNone(result.get('trip'))
+
+    def test_general_place_question_does_not_give_route(self):
+        result = chat_reply([{'role':'user', 'content':'¿Cuál es la historia de Bello y Envigado?'}], None, lambda *a: None)
+        self.assertFalse(result.get('trip'))
+
+if __name__ == '__main__':
+    unittest.main()

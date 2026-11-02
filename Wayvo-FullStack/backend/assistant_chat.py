@@ -24,19 +24,197 @@ def normalize(s):
     return re.sub(r'\s+', ' ', ''.join(c for c in s if not unicodedata.combining(c))).strip()
 
 
+def is_route_question(text):
+    """Distinguish travel questions from general conversations about places."""
+    t = normalize(text)
+    return bool(re.search(
+        r'\b(?:ir|llegar|viajar|voy|llego|salgo|saliendo|parto|estoy|'
+        r'bus|buses|ruta|rutas|transporte|trasbordo|transbordo|recorrido|'
+        r'desplazarme|lleva|llevas|llevar|llevarme|camino|conectar|conexion|trayecto|'
+        r'mapa|paradero|ubicacion|direccion|origen|destino)\b', t))
+
+
 def parse_places(text):
-    t=normalize(text)
-    patterns=[
-        r'(?:desde|de|estoy en|salgo de|salgo desde)\s+(.+?)\s+(?:hasta|hacia|a|para|y quiero (?:ir|llegar) a|y necesito (?:ir|llegar) a)\s+(.+)',
-        r'(?:ir|llegar|viajar)\s+de\s+(.+?)\s+(?:a|hasta|hacia)\s+(.+)',
+    """Extract known origin and destination from common Spanish phrasings.
+
+    Never infer a route from two place names in a non-travel question.
+    Only return recognized demo stops. No geocoding or invented buses.
+    """
+    t = normalize(text)
+    if not is_route_question(t):
+        # Continuaciones breves: «¿y de Bello a Envigado?», «ahora desde
+        # Laureles hasta Centro», «¿qué tal de Centro a Bello?». Exigir una
+        # estructura origen→destino evita activar el mapa ante cualquier
+        # mención de dos ciudades, como «historia de Bello y Envigado».
+        short_route = re.match(
+            r'^\s*[¿?¡!]*\s*(?:(?:y|ahora|entonces|luego|despues|que tal|si)\s+)*'
+            r'(?:de|desde)\s+.+?\s+(?:a|hasta|hacia|para)\s+.+', t)
+        if not short_route:
+            return None
+    patterns = [
+        # "De Laureles a Bello", "estoy en Laureles, quiero ir a Bello".
+        r'(?:desde|de|estoy en|salgo de|salgo desde|parto de|me encuentro en)\s+(.+?)\s+'
+        r'(?:hasta|hacia|a|para|y (?:quiero|necesito) (?:ir|llegar) a|,?\s*(?:quiero|necesito) (?:ir|llegar) a)\s+(.+)',
+        r'(?:ir|llegar|viajar|moverme)\s+de\s+(.+?)\s+(?:a|hasta|hacia|para)\s+(.+)',
+        # Destination first: "Cómo llego a Bello desde Laureles".
+        r'(?:llegar|ir|voy|llego|lleva|viajar)\s+(?:a|hasta|hacia)\s+(.+?)\s+(?:desde|saliendo de|partiendo de|si salgo de|si estoy en|estoy en)\s+(.+)',
+        r'(?:a|hasta|hacia)\s+(.+?)\s+(?:desde|saliendo de|partiendo de)\s+(.+)',
     ]
-    for pattern in patterns:
-        match=re.search(pattern,t)
+    for n, pattern in enumerate(patterns):
+        match = re.search(pattern, t)
         if match:
-            origin=match.group(1).strip(' ¿?¡!.,')
-            destination=match.group(2).strip(' ¿?¡!.,')
-            destination=re.sub(r'\s+(?:en bus|en transporte|por favor|hoy|manana)$','',destination)
-            return origin,destination
+            one, two = (part.strip(' ¿?¡!.,;: ') for part in match.groups())
+            # Last two patterns say destination first, then origin.
+            origin, dest = (two, one) if n >= 2 else (one, two)
+            a, b = choose_stop(origin), choose_stop(dest)
+            if origin and dest:
+                # Even unknown explicit places must produce a clear no-route result,
+                # never an AI-invented bus or an unrelated general answer.
+                return a or origin, b or dest
+    # For colloquial questions with a clear origin/destination order:
+    # "Estoy en Laureles, ¿qué bus me lleva a Bello?"
+    names = sorted({stop for route in DEMO_ROUTES for stop in route['stops']}, key=len, reverse=True)
+    mentions = []
+    for name in names:
+        key = normalize(name)
+        for match in re.finditer(r'(?<!\w)' + re.escape(key) + r'(?!\w)', t):
+            if not any(start <= match.start() < stop for start, stop, _ in mentions):
+                mentions.append((match.start(), match.end(), name))
+    mentions.sort()
+    if len(mentions) == 2:
+        first, second = mentions[0][2], mentions[1][2]
+        # Only guess direction when the message identifies a departure or an arrival.
+        if re.search(r'(?:\bdesde\b|\bestoy en\b|\bsalgo\b|\bde\b)', t):
+            return first, second
+        if re.search(r'(?:\ba\b|\bhasta\b|\bdestino\b)', t):
+            return second, first
+    return None
+
+
+def only_destination(text):
+    """Recognize a requested destination without inventing the departure."""
+    t = normalize(text)
+    patterns = (
+        r'(?:como (?:voy|llego|puedo (?:ir|llegar))|quiero (?:ir|llegar)|'
+        r'necesito (?:ir|llegar)|voy|llegar|ir)\s+(?:a|hasta|hacia)\s+(.+)',
+        r'(?:mi destino es|destino:?)\s+(.+)',
+    )
+    for pattern in patterns:
+        match = re.search(pattern, t)
+        if match:
+            dest = choose_stop(match.group(1).strip(' ¿?¡!.,;:'))
+            if dest:
+                return dest
+    if t in {normalize(s) for s in demo_stops()}:
+        return choose_stop(t)
+    return None
+
+
+def only_origin(text):
+    """Recognize a departure provided separately in the chat."""
+    t = normalize(text)
+    patterns = (
+        r'(?:desde|salgo de|salgo desde|estoy en|parto de|mi origen es|origen:?)\s+(.+)',
+    )
+    for pattern in patterns:
+        match = re.search(pattern, t)
+        if match:
+            origin = choose_stop(match.group(1).strip(' ¿?¡!.,;:'))
+            if origin:
+                return origin
+    if t in {normalize(s) for s in demo_stops()}:
+        return choose_stop(t)
+    return None
+
+
+def resolve_trip_request(messages):
+    """Resolve each request independently; allow clear conversational follow-ups."""
+    question = messages[-1]['content']
+    direct = parse_places(question)
+    if direct:
+        return direct
+    users = [m['content'] for m in messages if m['role'] == 'user']
+    if len(users) < 2:
+        return None
+
+    # «Y en sentido contrario», «Ahora a Robledo» after a completed trip.
+    last_trip = recent_trip(users[:-1])
+    change = conversational_change(question, last_trip)
+    if change:
+        return change
+
+    # «¿Cómo voy a Bello?» -> «Desde Laureles» and the reverse order.
+    last_origin, last_dest = only_origin(question), only_destination(question)
+    for earlier in reversed(users[-4:-1]):
+        if not is_route_question(earlier):
+            continue
+        prev_origin, prev_dest = only_origin(earlier), only_destination(earlier)
+        if last_origin and prev_dest and last_origin != prev_dest:
+            return last_origin, prev_dest
+        if last_dest and prev_origin and prev_origin != last_dest:
+            return prev_origin, last_dest
+    return None
+
+
+def recent_trip(users):
+    """Reconstruct the most recent trip from a short sequence of user messages.
+
+    This handles successive changes («ahora a Robledo», «sentido contrario»)
+    without falsely using a much older direct route.
+    """
+    completed = None
+    pending_origin = None
+    pending_destination = None
+    for question in users[-8:]:
+        direct = parse_places(question)
+        if direct:
+            completed = direct if all(choose_stop(p) for p in direct) else None
+            pending_origin = pending_destination = None
+            continue
+        revised = conversational_change(question, completed)
+        if revised:
+            completed = revised
+            pending_origin = pending_destination = None
+            continue
+        departure, arrival = only_origin(question), only_destination(question)
+        if departure and pending_destination and departure != pending_destination:
+            completed = departure, pending_destination
+            pending_origin = pending_destination = None
+        elif arrival and pending_origin and pending_origin != arrival:
+            completed = pending_origin, arrival
+            pending_origin = pending_destination = None
+        elif departure or arrival:
+            pending_origin, pending_destination = departure, arrival
+        else:
+            # General questions break conversational travel context.
+            completed = pending_origin = pending_destination = None
+    return completed
+
+
+def conversational_change(question, last_trip):
+    """Handle clear follow-ups without reusing unrelated old route data."""
+    if not last_trip:
+        return None
+    normalized = normalize(question).strip(' ¿?¡!.,;: ')
+    origin, destination = last_trip
+    if re.search(r'(?:sentido contrario|ruta inversa|al reves|a la inversa|ruta de regreso)', normalized):
+        return destination, origin
+    # «¿Y ahora a Robledo?» keeps the departure of the last route.
+    dest_match = re.match(
+        r'^(?:(?:y|ahora|entonces|despues|luego)\s+)*(?:a|hasta|hacia|para)\s+(.+)$',
+        normalized)
+    if dest_match:
+        new_destination = choose_stop(dest_match.group(1))
+        if new_destination:
+            return origin, new_destination
+    # «¿Y desde Laureles?» keeps the destination of the last route.
+    origin_match = re.match(
+        r'^(?:(?:y|ahora|entonces|despues|luego)\s+)*(?:de|desde)\s+(.+)$',
+        normalized)
+    if origin_match:
+        new_origin = choose_stop(origin_match.group(1))
+        if new_origin:
+            return new_origin, destination
     return None
 
 
@@ -184,16 +362,34 @@ def chat_reply(messages, location, fetch_json):
     question=messages[-1]['content']
     local=local_answer(question,location)
     # Public transport route choices and GPS are deterministic: the model may not change or invent them.
-    places = parse_places(question)
+    places = resolve_trip_request(messages)
     if places:
-        trip=quick_route(*places)
-        return {'answer':local,'source':'demo_route_engine','demo':True,
-                'trip':trip if trip.get('found') else None}
+        trip = quick_route(*places)
+        if trip.get('found'):
+            legs = ' y luego '.join(
+                f"{s['bus']} desde {s['board_at']} hasta {s['get_off_at']}"
+                for s in trip['segments']
+            )
+            return {
+                'answer': f'En las rutas de demostración puedes tomar {legs}. '
+                          'Pulsa «Ver ruta y paradero en el mapa» para visualizar el recorrido simulado.',
+                'source': 'demo_route_engine', 'demo': True, 'trip': trip,
+            }
+        return {
+            'answer': 'No hay una conexión disponible entre esos paraderos en nuestras rutas simuladas. '
+                      'Prueba otro origen o destino en Ruta Express.',
+            'source': 'demo_route_engine', 'demo': True, 'trip': None,
+        }
     if any(x in normalize(question) for x in ('donde estoy','mi ubicacion','ubicacion actual','donde me encuentro')):
 
         return {'answer':local,'source':'demo_route_engine','demo':True}
-    if re.search(r'(?:como (?:voy|llego)|quiero (?:ir|llegar)|necesito (?:ir|llegar))\s+a\s+',normalize(question)) and not places:
-        return {'answer':local,'source':'demo_route_engine','demo':True}
+    if only_destination(question):
+        return {'answer': f'Para ir a {only_destination(question)}, dime desde qué barrio o paradero sales. '
+                          'Te mostraré el recorrido de demostración en el mapa.',
+                'source':'demo_route_engine','demo':True}
+    if only_origin(question):
+        return {'answer':'¿A qué barrio o paradero quieres llegar? Dime el destino y buscaré una ruta de demostración.',
+                'source':'demo_route_engine','demo':True}
     if not os.environ.get('OPENAI_API_KEY'):
         return {'answer':local,'source':'demo_local','demo':True}
     # Coordinates are not needed for general chat, so never forward GPS data to OpenAI.
